@@ -1,6 +1,6 @@
 aiogram==3.0.0
 sqlalchemy==2.0.0
 python-dotenv==1.0.0
-aiofiles==23.2.0
+aiofiles==23.1.0  # 23.2.0 emas!
 pydub==0.25.1
 asyncpg==0.29.0
