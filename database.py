@@ -4,13 +4,16 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import Column, Integer, String, Float, DateTime, Text, Boolean, ForeignKey
 from datetime import datetime
 
-# Get DATABASE_URL from environment
+# Get DATABASE_URL from Railway
 DATABASE_URL = os.getenv('DATABASE_URL')
-if DATABASE_URL and DATABASE_URL.startswith('postgresql://'):
-    # Convert to asyncpg for Railway PostgreSQL
-    DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://')
-else:
+
+# Agar DATABASE_URL yo'q bo'lsa (local development uchun)
+if not DATABASE_URL:
     DATABASE_URL = "sqlite+aiosqlite:///./database.db"
+    
+# Agar Railway PostgreSQL bergan bo'lsa, asyncpg ga o'zgartirish
+elif DATABASE_URL.startswith('postgresql://'):
+    DATABASE_URL = DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://')
 
 # Create engine
 engine = create_async_engine(DATABASE_URL, echo=True)
