@@ -1,0 +1,25 @@
+# .gitignore fayli
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+.env.local
+database.db
+data/audio/*.mp3
+data/audio/*.wav
+*.mp3
+*.wav
+*.ogg
+*.log
+.DS_Store
+
+echo ".env" > .gitignore
+echo "__pycache__/" >> .gitignore
+echo "*.pyc" >> .gitignore
+echo "database.db" >> .gitignore
+echo "data/audio/*" >> .gitignore
+echo "quiz_bot.db" >> .gitignore  # Audio fayllarni GitHub ga yuklamaslik uchun
