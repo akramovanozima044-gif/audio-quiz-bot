@@ -5,7 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
-from database import create_db, AsyncSessionLocal
+from database import create_db, async_session
 from middlewares import DatabaseMiddleware, UserMiddleware
 from handlers import router
 from dotenv import load_dotenv
