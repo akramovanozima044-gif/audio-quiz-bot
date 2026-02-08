@@ -1,12 +1,8 @@
+# .gitignore
 .env
 *.db
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
-.DS_Store
-.vscode/
-.idea/
-data/audio/*
-!data/audio/.gitkeep
-instance/
+*.mp3
+*.wav
+uploads/

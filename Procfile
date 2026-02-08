@@ -1,1 +1,2 @@
-web: python main.py
+# Procfile
+web: python -m bot.main
