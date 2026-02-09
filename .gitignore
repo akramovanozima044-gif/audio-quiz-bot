@@ -1,8 +1,9 @@
-# .gitignore
 .env
 *.db
 __pycache__/
 *.pyc
+uploads/
 *.mp3
 *.wav
-uploads/
+*.ogg
+.DS_Store
