@@ -2961,6 +2961,31 @@ async def main():
     logger.info("Bot starting...")
     await dp.start_polling(bot)
 
+# ... boshqa kodlar
+
 if __name__ == "__main__":
+    # Railway uchun simple HTTP server
+    import threading
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(b'OK')
+        def log_message(self, format, *args):
+            pass  # Loglarni o'chirish
+    
+    # Health serverni alohida threadda ishga tushirish
+    def run_health():
+        port = int(os.getenv("PORT", 8000))
+        server = HTTPServer(('0.0.0.0', port), HealthHandler)
+        print(f"✅ Health server running on port {port}")
+        server.serve_forever()
+    
+    health_thread = threading.Thread(target=run_health, daemon=True)
+    health_thread.start()
+    
+    # Botni ishga tushirish
     asyncio.run(main())
-    #async with get_session() as session:
