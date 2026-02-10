@@ -1,4 +1,4 @@
-# database.py (PostgreSQL uchun)
+# database.py - TO'LIQ TO'G'RILANGAN VERSIYA
 import os
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime, Text
 from sqlalchemy.ext.declarative import declarative_base
@@ -67,17 +67,14 @@ class TestResult(Base):
     
     user = relationship("User", back_populates="test_results")
 
-# Database engine (PostgreSQL uchun)
+# Database engine
 async def init_db():
-    # PostgreSQL connection string
     DATABASE_URL = os.getenv("DATABASE_URL")
     
     if DATABASE_URL:
-        # PostgreSQL uchun
         if DATABASE_URL.startswith("postgresql://"):
             DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
     else:
-        # Local development uchun SQLite
         DATABASE_URL = "sqlite+aiosqlite:///database.db"
     
     engine = create_async_engine(DATABASE_URL, echo=True)
@@ -87,7 +84,7 @@ async def init_db():
     
     return engine
 
-# Session factory
+# Global session factory
 async def get_session():
     DATABASE_URL = os.getenv("DATABASE_URL")
     

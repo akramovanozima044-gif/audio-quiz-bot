@@ -1,6 +1,11 @@
 # bot.py
+# bot.py - IMPORT qismi
 import asyncio
 import logging
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
+
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
@@ -8,20 +13,15 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import FSInputFile, ReplyKeyboardRemove
 from aiogram.enums import ParseMode
-from sqlalchemy import select, func, distinct
-import ast
-import os
-from database import init_db, get_session
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
-from aiohttp import web
+from sqlalchemy import select
 
 from config import config
-from database import async_session, User, Book, Unit, Question, TestResult, init_db
+# ✅ TO'G'RI IMPORT:
+from database import User, Book, Unit, Question, TestResult, init_db, get_session
 from keyboards import (
     get_admin_menu, get_user_menu, get_confirm_keyboard,
     get_books_keyboard, get_test_create_menu, get_users_management_keyboard,
     get_test_finish_menu,
-    # ✅ Yangi keyboard funksiyalari:
     get_books_for_create_keyboard,
     get_units_keyboard,
     get_add_question_keyboard,
@@ -39,7 +39,10 @@ from keyboards import (
     get_unit_manage_options,
     get_questions_manage_keyboard,
     get_question_manage_options,
-    get_confirmation_keyboard
+    get_confirmation_keyboard,
+    get_users_delete_keyboard,
+    get_user_delete_confirmation_keyboard,
+    get_user_menu_updated
 )
 
 # Logging sozlash
@@ -52,6 +55,8 @@ logger = logging.getLogger(__name__)
 # Bot va dispatcher
 bot = Bot(token=config.BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
+# ... boshqa FSM va funksiyalar
 
 # FSM holatlari
 class AdminStates(StatesGroup):
@@ -100,6 +105,7 @@ class FormatStates(StatesGroup):
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
     
+    async_session = await get_session()
     async with async_session() as session:
         try:
             # Foydalanuvchini bazada qidirish (Telegram user_id bo'yicha)
@@ -172,7 +178,8 @@ async def admin_create_test(message: types.Message, state: FSMContext):
     if message.from_user.id != config.ADMIN_ID:
         await message.answer("Sizga ruxsat yo'q!")
         return
-    
+
+    async_session = await get_session()
     await message.answer(
         "📝 Test tuzish bo'limi:\n"
         "Kerakli amalni tanlang:",
@@ -187,6 +194,7 @@ async def admin_solve_test(message: types.Message):
         await message.answer("Sizga ruxsat yo'q!")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Book)
         result = await session.execute(stmt)
@@ -208,6 +216,7 @@ async def admin_solve_test(message: types.Message):
 async def back_to_user_main(message: types.Message, state: FSMContext):
     await state.clear()
     
+    async_session = await get_session()
     async with async_session() as session:
         # Foydalanuvchi aktivligini tekshirish
         stmt = select(User).where(User.user_id == message.from_user.id)
@@ -249,6 +258,7 @@ async def view_users(message: types.Message):
         await message.answer("Sizga ruxsat yo'q!")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(User).where(User.is_admin == False)
         result = await session.execute(stmt)
@@ -367,6 +377,7 @@ async def send_broadcast(message: types.Message, state: FSMContext):
     if message.from_user.id != config.ADMIN_ID:
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(User.user_id).where(
             (User.is_active == True) & 
@@ -418,6 +429,7 @@ async def back_to_books(callback: types.CallbackQuery):
         await callback.answer("Sizga ruxsat yo'q!", show_alert=True)
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Book)
         result = await session.execute(stmt)
@@ -440,6 +452,7 @@ async def show_existing_books(message: types.Message):
         await message.answer("Sizga ruxsat yo'q!")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Book)
         result = await session.execute(stmt)
@@ -480,6 +493,7 @@ async def process_new_book_name(message: types.Message, state: FSMContext):
         await message.answer("❌ Bekor qilindi.", reply_markup=get_test_create_menu())
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         # Kitobni bazaga qo'shish
         new_book = Book(
@@ -505,6 +519,7 @@ async def select_book_for_create(callback: types.CallbackQuery):
     
     book_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         # Kitobning unitlarini olish
         stmt = select(Unit).where(Unit.book_id == book_id)
@@ -568,6 +583,7 @@ async def process_new_unit_name(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     book_id = user_data.get('book_id')
     
+    async_session = await get_session()
     async with async_session() as session:
         # Unitni bazaga qo'shish
         new_unit = Unit(
@@ -604,6 +620,7 @@ async def select_unit_for_create(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -777,6 +794,7 @@ async def finish_creating(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -811,6 +829,7 @@ async def back_to_units(callback: types.CallbackQuery):
     
     book_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Unit).where(Unit.book_id == book_id)
         result = await session.execute(stmt)
@@ -832,6 +851,7 @@ async def back_to_books_from_units(callback: types.CallbackQuery):
         await callback.answer("Sizga ruxsat yo'q!", show_alert=True)
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Book)
         result = await session.execute(stmt)
@@ -884,6 +904,8 @@ async def back_to_admin_main(message: types.Message):
 # User menyusi
 @dp.message(F.text == "📚 Test yechish")
 async def user_test_solve(message: types.Message):
+    
+    async_session = await get_session()
     async with async_session() as session:
         # Foydalanuvchi aktivligini tekshirish
         stmt = select(User).where(User.user_id == message.from_user.id)
@@ -923,6 +945,7 @@ async def select_book_for_test(callback: types.CallbackQuery):
     
     # User uchun ruxsatni tekshirish
     if user_type == "user":
+        async_session = await get_session()
         async with async_session() as session:
             stmt = select(User).where(User.user_id == callback.from_user.id)
             result = await session.execute(stmt)
@@ -963,6 +986,7 @@ async def select_unit_for_test(callback: types.CallbackQuery):
     
     # User uchun ruxsatni tekshirish
     if user_type == "user":
+        async_session = await get_session()
         async with async_session() as session:
             stmt = select(User).where(User.user_id == callback.from_user.id)
             result = await session.execute(stmt)
@@ -1102,6 +1126,7 @@ async def start_test(callback: types.CallbackQuery, state: FSMContext):
     
     # User uchun ruxsatni tekshirish
     if user_type == "user":
+        async_session = await get_session()
         async with async_session() as session:
             stmt = select(User).where(User.user_id == callback.from_user.id)
             result = await session.execute(stmt)
@@ -1270,6 +1295,7 @@ async def restart_test(message: types.Message, state: FSMContext):
         return
     
     # Unit ma'lumotlarini olish
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -1301,6 +1327,7 @@ async def back_to_test_units_from_start(callback: types.CallbackQuery):
     unit_id = int(data_parts[-2])
     user_type = data_parts[-1]
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -1325,6 +1352,7 @@ async def back_to_test_units_from_start(callback: types.CallbackQuery):
 async def back_to_test_books(callback: types.CallbackQuery):
     user_type = callback.data.split("_")[-1]
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Book)
         result = await session.execute(stmt)
@@ -1339,6 +1367,7 @@ async def back_to_test_books(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "back_to_user_menu")
 async def back_to_user_menu(callback: types.CallbackQuery):
+    async_session = await get_session()
     async with async_session() as session:
         # Foydalanuvchi aktivligini tekshirish
         stmt = select(User).where(User.user_id == callback.from_user.id)
@@ -1379,7 +1408,8 @@ async def manage_books(message: types.Message):
     if message.from_user.id != config.ADMIN_ID:
         await message.answer("Sizga ruxsat yo'q!")
         return
-    
+
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Book)
         result = await session.execute(stmt)
@@ -1402,6 +1432,7 @@ async def manage_units_menu(message: types.Message):
         await message.answer("Sizga ruxsat yo'q!")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         # Kitoblarni ko'rsatish
         stmt = select(Book)
@@ -1433,6 +1464,7 @@ async def manage_questions_menu(message: types.Message):
         await message.answer("Sizga ruxsat yo'q!")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         # Kitoblarni ko'rsatish
         stmt = select(Book)
@@ -1466,6 +1498,7 @@ async def manage_book(callback: types.CallbackQuery):
     
     book_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         book = await session.get(Book, book_id)
         
@@ -1515,6 +1548,7 @@ async def process_new_book_name_update(message: types.Message, state: FSMContext
     user_data = await state.get_data()
     book_id = user_data.get('book_id')
     
+    async_session = await get_session()
     async with async_session() as session:
         book = await session.get(Book, book_id)
         old_name = book.name
@@ -1539,6 +1573,7 @@ async def delete_book_confirmation(callback: types.CallbackQuery):
     
     book_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         book = await session.get(Book, book_id)
         
@@ -1580,6 +1615,7 @@ async def confirm_delete_book(callback: types.CallbackQuery):
     
     book_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         book = await session.get(Book, book_id)
         book_name = book.name
@@ -1639,6 +1675,7 @@ async def view_units_of_book(callback: types.CallbackQuery):
     
     book_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         book = await session.get(Book, book_id)
         
@@ -1680,6 +1717,7 @@ async def manage_unit(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -1725,6 +1763,7 @@ async def process_new_unit_name_update(message: types.Message, state: FSMContext
     user_data = await state.get_data()
     unit_id = user_data.get('unit_id')
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -1751,6 +1790,7 @@ async def delete_unit_confirmation(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -1788,6 +1828,7 @@ async def confirm_delete_unit(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -1833,6 +1874,7 @@ async def view_questions_of_unit(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -1879,6 +1921,7 @@ async def manage_question(callback: types.CallbackQuery):
     
     question_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         question = await session.get(Question, question_id)
         unit = await session.get(Unit, question.unit_id)
@@ -1940,6 +1983,7 @@ async def process_new_question_audio(message: types.Message, state: FSMContext):
         file_id = message.document.file_id
         file_name = message.document.file_name or "audio.mp3"
     
+    async_session = await get_session()
     async with async_session() as session:
         question = await session.get(Question, question_id)
         unit = await session.get(Unit, question.unit_id)
@@ -1970,6 +2014,7 @@ async def edit_question_options_start(callback: types.CallbackQuery, state: FSMC
     
     await state.update_data(question_id=question_id, action="edit_question_options")
     
+    async_session = await get_session()
     async with async_session() as session:
         question = await session.get(Question, question_id)
         
@@ -2005,6 +2050,7 @@ async def process_new_question_options(message: types.Message, state: FSMContext
         )
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         question = await session.get(Question, question_id)
         unit = await session.get(Unit, question.unit_id)
@@ -2037,6 +2083,7 @@ async def edit_question_answer_start(callback: types.CallbackQuery, state: FSMCo
     
     await state.update_data(question_id=question_id, action="edit_question_answer")
     
+    async_session = await get_session()
     async with async_session() as session:
         question = await session.get(Question, question_id)
         unit = await session.get(Unit, question.unit_id)
@@ -2069,6 +2116,7 @@ async def process_new_correct_answer(message: types.Message, state: FSMContext):
     question_id = user_data.get('question_id')
     
     try:
+        async_session = await get_session()
         async with async_session() as session:
             question = await session.get(Question, question_id)
             unit = await session.get(Unit, question.unit_id)
@@ -2121,6 +2169,7 @@ async def delete_question_confirmation(callback: types.CallbackQuery):
     
     question_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         question = await session.get(Question, question_id)
         unit = await session.get(Unit, question.unit_id)
@@ -2147,6 +2196,7 @@ async def confirm_delete_question(callback: types.CallbackQuery):
     
     question_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         question = await session.get(Question, question_id)
         unit = await session.get(Unit, question.unit_id)
@@ -2194,6 +2244,7 @@ async def back_to_books_manage(callback: types.CallbackQuery):
         await callback.answer("Sizga ruxsat yo'q!", show_alert=True)
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         stmt = select(Book)
         result = await session.execute(stmt)
@@ -2220,6 +2271,7 @@ async def back_to_book_manage(callback: types.CallbackQuery):
     
     book_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         book = await session.get(Book, book_id)
         
@@ -2254,6 +2306,7 @@ async def back_to_units_manage(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -2279,6 +2332,7 @@ async def back_to_unit_manage(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -2309,6 +2363,7 @@ async def back_to_questions_manage(callback: types.CallbackQuery):
     
     unit_id = int(callback.data.split("_")[-1])
     
+    async_session = await get_session()
     async with async_session() as session:
         unit = await session.get(Unit, unit_id)
         book = await session.get(Book, unit.book_id)
@@ -2361,6 +2416,7 @@ async def cancel_action(callback: types.CallbackQuery):
         await back_to_book_manage(callback)
     elif action == "delete_unit":
         unit_id = item_id
+        async_session = await get_session()
         async with async_session() as session:
             unit = await session.get(Unit, unit_id)
             book = await session.get(Book, unit.book_id)
@@ -2407,6 +2463,7 @@ async def delete_user_menu(message: types.Message):
         await message.answer("Sizga ruxsat yo'q!")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         # Faqat oddiy foydalanuvchilarni olish (adminlarni emas)
         stmt = select(User).where(
@@ -2449,6 +2506,7 @@ async def delete_user_start(callback: types.CallbackQuery):
         await callback.answer("❌ Siz o'zingizni o'chira olmaysiz!", show_alert=True)
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         # Foydalanuvchini topish
         stmt = select(User).where(User.user_id == user_id)
@@ -2499,6 +2557,7 @@ async def confirm_delete_user(callback: types.CallbackQuery):
         await callback.answer("❌ Siz o'zingizni o'chira olmaysiz!", show_alert=True)
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         # Foydalanuvchini topish
         stmt = select(User).where(User.user_id == user_id)
@@ -2562,7 +2621,7 @@ async def cancel_delete_user(callback: types.CallbackQuery):
         "❌ Foydalanuvchini o'chirish bekor qilindi."
     )
     
-    # Foydalanuvchilar ro'yxatiga qaytish
+    async_session = await get_session()# Foydalanuvchilar ro'yxatiga qaytish
     async with async_session() as session:
         stmt = select(User).where(User.user_id != config.ADMIN_ID)
         result = await session.execute(stmt)
@@ -2621,6 +2680,7 @@ async def user_my_results(message: types.Message):
         await message.answer("Bu funksiya faqat oddiy foydalanuvchilar uchun.")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         try:
             # 1. Foydalanuvchini topish
@@ -2720,6 +2780,7 @@ async def admin_general_results(message: types.Message):
         await message.answer("Sizga ruxsat yo'q!")
         return
     
+    async_session = await get_session()
     async with async_session() as session:
         try:
             # 1. Barcha foydalanuvchilar bo'yicha umumiy statistika
@@ -2873,7 +2934,8 @@ async def admin_general_results(message: types.Message):
 
 @dp.message(F.text == "/testdebug")
 async def test_debug(message: types.Message):
-    """Test debug ma'lumotlari"""
+    
+    async_session = await get_session()"""Test debug ma'lumotlari"""
     async with async_session() as session:
         # Foydalanuvchini topish
         stmt_user = select(User).where(User.user_id == message.from_user.id)
@@ -2952,40 +3014,57 @@ async def main_webhook():
         await dp.start_polling(bot)
 
 # =================== MAIN FUNCTION ===================
-async def main():
-    # Database yaratish
-    await init_db()
-    logger.info("Database initialized")
-    
-    # Botni ishga tushirish
-    logger.info("Bot starting...")
-    await dp.start_polling(bot)
+# bot.py - ASOSIY FUNKSIYA (oxiri)
 
-# ... boshqa kodlar
-
-if __name__ == "__main__":
-    # Railway uchun simple HTTP server
-    import threading
-    from http.server import HTTPServer, BaseHTTPRequestHandler
-    
-    class HealthHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
             self.wfile.write(b'OK')
-        def log_message(self, format, *args):
-            pass  # Loglarni o'chirish
+        else:
+            self.send_response(404)
+            self.end_headers()
     
+    def log_message(self, format, *args):
+        pass  # Loglarni chiqarmaslik
+
+def run_health_server():
+    port = int(os.getenv("PORT", 8000))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    logger.info(f"✅ Health server running on port {port}")
+    server.serve_forever()
+
+async def main_bot():
+    try:
+        # Database yaratish
+        await init_db()
+        logger.info("✅ Database initialized")
+        
+        # Botni ishga tushirish
+        logger.info("🚀 Bot starting...")
+        
+        # Configni tekshirish
+        config.validate()
+        logger.info("✅ Config validated")
+        
+        # Polling ni boshlash
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+        
+    except Exception as e:
+        logger.error(f"❌ Bot failed to start: {e}")
+        raise
+
+if __name__ == "__main__":
     # Health serverni alohida threadda ishga tushirish
-    def run_health():
-        port = int(os.getenv("PORT", 8000))
-        server = HTTPServer(('0.0.0.0', port), HealthHandler)
-        print(f"✅ Health server running on port {port}")
-        server.serve_forever()
-    
-    health_thread = threading.Thread(target=run_health, daemon=True)
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
     
     # Botni ishga tushirish
-    asyncio.run(main())
+    try:
+        asyncio.run(main_bot())
+    except KeyboardInterrupt:
+        logger.info("👋 Bot stopped by user")
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
