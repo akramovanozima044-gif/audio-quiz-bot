@@ -1,46 +1,39 @@
-# config.py - YANGILANGAN VERSIYA
+# config.py - Tuzatilgan Railway uchun
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 class Config:
-    # Environment variables
+    # Environment variables - Railway to'g'ridan-to'g'ri beradi
     BOT_TOKEN = os.getenv("BOT_TOKEN")
     ADMIN_ID = os.getenv("ADMIN_ID")
     DATABASE_URL = os.getenv("DATABASE_URL")
-    PORT = os.getenv("PORT", "8000")
+    
+    # PORT - Railway avtomatik beradi, int ga o'tkazamiz
+    PORT = int(os.getenv("PORT", "8000"))
+    
+    # Webhook URL (agar ishlatilsa)
+    RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
     
     # Token validation
     @classmethod
     def validate_token(cls):
         if not cls.BOT_TOKEN:
-            print("❌ ERROR: BOT_TOKEN is not set!")
-            print("Please set BOT_TOKEN in Railway Variables")
+            print("❌ ERROR: BOT_TOKEN is not set in Railway Variables!")
+            print("Please add BOT_TOKEN in Railway dashboard")
             return False
         
-        # Token format tekshirish
-        if ':' not in cls.BOT_TOKEN:
-            print(f"❌ ERROR: Invalid token format! Token: {cls.BOT_TOKEN}")
+        # Token format tekshirish (soddalashtirilgan)
+        if not cls.BOT_TOKEN or ':' not in cls.BOT_TOKEN:
+            print(f"❌ ERROR: Invalid token format!")
             print("Token should be like: 1234567890:AAHhDkjsdfjkKJHSDFJKHSDFjk")
             return False
         
-        parts = cls.BOT_TOKEN.split(':')
-        if len(parts) != 2:
-            print(f"❌ ERROR: Invalid token format! Token: {cls.BOT_TOKEN}")
-            return False
-        
-        if not parts[0].isdigit() or len(parts[0]) != 10:
-            print(f"❌ ERROR: Invalid token ID part! Token: {cls.BOT_TOKEN}")
-            return False
-        
-        print(f"✅ Token format is valid (ID: {parts[0]})")
+        print(f"✅ Bot token is set")
         return True
     
     @classmethod
     def validate_admin_id(cls):
         if not cls.ADMIN_ID:
-            print("⚠️ WARNING: ADMIN_ID is not set!")
+            print("⚠️ WARNING: ADMIN_ID is not set in Railway Variables!")
             print("You can get your ID from @userinfobot")
             return False
         
@@ -57,24 +50,23 @@ class Config:
     
     @classmethod
     def validate_all(cls):
-        print("🔍 Validating configuration...")
+        print("🔍 Validating Railway configuration...")
         
         # Token tekshirish
         if not cls.validate_token():
             return False
         
-        # Admin ID tekshirish
-        if not cls.validate_admin_id():
-            return False
+        # Admin ID tekshirish (warning beradi, lekin to'xtamaydi)
+        cls.validate_admin_id()
         
         # Database URL tekshirish
         if not cls.DATABASE_URL:
             print("⚠️ WARNING: DATABASE_URL is not set!")
-            print("Railway will provide it automatically")
+            print("Railway PostgreSQL will provide it automatically")
         else:
             print("✅ DATABASE_URL is set")
         
-        print(f"✅ All validations passed!")
+        print(f"✅ Config validations completed")
         print(f"📊 Config summary:")
         print(f"   - BOT_TOKEN: {'Set' if cls.BOT_TOKEN else 'Not set'}")
         print(f"   - ADMIN_ID: {cls.ADMIN_ID}")
@@ -84,7 +76,3 @@ class Config:
         return True
 
 config = Config()
-
-# Bot ishga tushganda tekshirish
-if __name__ == "__main__":
-    config.validate_all()
