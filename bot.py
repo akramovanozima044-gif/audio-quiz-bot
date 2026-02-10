@@ -42,7 +42,7 @@ from keyboards import (
     get_confirmation_keyboard,
     get_users_delete_keyboard,
     get_user_delete_confirmation_keyboard,
-    get_user_menu_updated
+    
 )
 
 # Logging sozlash
