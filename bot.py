@@ -2935,7 +2935,7 @@ async def admin_general_results(message: types.Message):
 @dp.message(F.text == "/testdebug")
 async def test_debug(message: types.Message):
     
-    async_session = await get_session()"""Test debug ma'lumotlari"""
+    async_session = await get_session()
     async with async_session() as session:
         # Foydalanuvchini topish
         stmt_user = select(User).where(User.user_id == message.from_user.id)
