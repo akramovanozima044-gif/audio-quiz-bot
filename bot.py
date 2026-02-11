@@ -1,15 +1,14 @@
 import os
 import logging
 import asyncio
+import sys
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram import F
 
-
-# Environment variables
+# Token olish
 TOKEN = os.environ.get('BOT_TOKEN')
-
 
 if not TOKEN:
     # Local development uchun .env faylidan o'qish
@@ -22,7 +21,8 @@ if not TOKEN:
 
 if not TOKEN:
     print("❌ XATO: BOT_TOKEN topilmadi!")
-    exit(1)
+    print("Iltimos, Railway da BOT_TOKEN environment variable ni o'rnating")
+    sys.exit(1)
 
 # Logging sozlash
 logging.basicConfig(
@@ -88,23 +88,25 @@ async def send_help(message: types.Message):
 # /quiz komandasi
 @dp.message(Command("quiz"))
 async def start_quiz_command(message: types.Message):
-    await start_quiz(message)
-
-# Start quiz callback
-@dp.callback_query(F.data == "start_quiz")
-async def start_quiz_callback(callback: CallbackQuery):
-    await callback.answer()
-    await start_quiz(callback.message)
-
-async def start_quiz(message: types.Message):
     user_id = message.from_user.id
     user_states[user_id] = {
         'current_question': 0,
         'score': 0,
         'total_questions': len(QUIZ_DATA)
     }
-    
     await send_question(user_id, message.chat.id)
+
+# Start quiz callback
+@dp.callback_query(F.data == "start_quiz")
+async def start_quiz_callback(callback: CallbackQuery):
+    await callback.answer()
+    user_id = callback.from_user.id
+    user_states[user_id] = {
+        'current_question': 0,
+        'score': 0,
+        'total_questions': len(QUIZ_DATA)
+    }
+    await send_question(user_id, callback.message.chat.id)
 
 async def send_question(user_id, chat_id):
     state = user_states.get(user_id)
@@ -125,7 +127,7 @@ async def send_question(user_id, chat_id):
         chat_id,
         f"🎵 Savol {question_index + 1}/{state['total_questions']}\n\n"
         f"{question['question']}\n\n"
-        f"Audio fragment yuborilmoqda..."
+        f"🔊 Audio fragment yuborilmoqda... (demo rejim)"
     )
     
     # Variantlar tugmalari
@@ -221,28 +223,69 @@ async def handle_audio(message: types.Message):
 async def echo_message(message: types.Message):
     await message.answer(
         "Men audio quiz botiman. Quizni boshlash uchun /quiz ni bosing yoki "
-        "yordam olish uchun /help ni bosing."
+        "yordam olish uchun /help ni bosing.\n\n"
+        "Boshlash uchun /start ni bosing."
     )
 
-# Botni ishga tushirish
-async def main():
-    logger.info("Bot ishga tushmoqda...")
+async def cleanup_webhook():
+    """Webhook ni to'liq o'chirish"""
+    logger.info("Webhook ni o'chirish jarayoni boshlandi...")
     
-    # Avval webhook ni o'chirish
     try:
+        # Webhook ni o'chirish
         await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("Webhook muvaffaqiyatli o'chirildi")
+        logger.info("✅ Webhook muvaffaqiyatli o'chirildi")
+        return True
     except Exception as e:
-        logger.warning(f"Webhook o'chirishda xatolik: {e}")
+        logger.error(f"❌ Webhook o'chirishda xatolik: {e}")
+        return False
+
+async def main():
+    logger.info("=" * 50)
+    logger.info("Audio Quiz Bot ishga tushmoqda...")
+    logger.info("=" * 50)
     
-    # Bot ma'lumotlarini olish
-    bot_info = await bot.get_me()
-    logger.info(f"Bot username: @{bot_info.username}")
-    logger.info(f"Bot ismi: {bot_info.first_name}")
-    logger.info(f"Bot ID: {bot_info.id}")
+    # 1. Webhook ni majburiy o'chirish
+    logger.info("1. Webhook ni o'chirish...")
+    success = await cleanup_webhook()
     
-    # Polling ni boshlash
-    await dp.start_polling(bot)
+    if not success:
+        logger.warning("Webhook o'chirishda muammo, qayta urinib ko'ramiz...")
+        # Qayta urinib ko'rish
+        await asyncio.sleep(2)
+        success = await cleanup_webhook()
+        
+        if not success:
+            logger.error("Webhook ni o'chirib bo'lmadi. Botni qayta ishga tushiring.")
+            return
+    
+    # 2. Bot ma'lumotlarini olish
+    logger.info("2. Bot ma'lumotlarini olish...")
+    try:
+        bot_info = await bot.get_me()
+        logger.info(f"✅ Bot username: @{bot_info.username}")
+        logger.info(f"✅ Bot ismi: {bot_info.first_name}")
+        logger.info(f"✅ Bot ID: {bot_info.id}")
+    except Exception as e:
+        logger.error(f"❌ Bot ma'lumotlarini olishda xatolik: {e}")
+        return
+    
+    # 3. Polling ni boshlash
+    logger.info("3. Polling ni boshlash...")
+    logger.info("✅ Bot muvaffaqiyatli ishga tushdi!")
+    logger.info("=" * 50)
+    
+    try:
+        await dp.start_polling(bot, skip_updates=True)
+    except Exception as e:
+        logger.error(f"❌ Pollingda xatolik: {e}")
+    finally:
+        await bot.session.close()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot to'xtatildi (Ctrl+C)")
+    except Exception as e:
+        logger.error(f"Kutilmagan xatolik: {e}")
