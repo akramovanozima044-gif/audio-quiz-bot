@@ -1,9 +1,10 @@
 import os
 import logging
+import asyncio
 from aiogram import Bot, Dispatcher, types
-from aiogram.contrib.middlewares.logging import LoggingMiddleware
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
+from aiogram.filters import Command
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram import F
 from dotenv import load_dotenv
 
 # Environment variables
@@ -16,14 +17,13 @@ logger = logging.getLogger(__name__)
 
 # Bot va Dispatcher yaratish
 bot = Bot(token=TOKEN)
-dp = Dispatcher(bot)
-dp.middleware.setup(LoggingMiddleware())
+dp = Dispatcher()
 
 # Quiz ma'lumotlari
 QUIZ_DATA = [
     {
         "question": "Bu qaysi qo'shiq?",
-        "audio_file": "audio1.mp3",  # Foydalanuvchi yuborishi kerak
+        "audio_file": "audio1.mp3",
         "options": ["Sevgi qo'shig'i", "Vatan qo'shig'i", "Dostlik qo'shig'i", "Tabiat qo'shig'i"],
         "correct_answer": 0
     },
@@ -38,12 +38,15 @@ QUIZ_DATA = [
 # Foydalanuvchilarning holati
 user_states = {}
 
-# Start komandasi
-@dp.message_handler(commands=['start'])
+# /start komandasi
+@dp.message(Command("start"))
 async def send_welcome(message: types.Message):
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(InlineKeyboardButton("Quizni boshlash 🎵", callback_data="start_quiz"))
-    keyboard.add(InlineKeyboardButton("Yordam ℹ️", callback_data="help"))
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Quizni boshlash 🎵", callback_data="start_quiz")],
+            [InlineKeyboardButton(text="Yordam ℹ️", callback_data="help")]
+        ]
+    )
     
     await message.reply(
         "🎧 Audio Quiz Botga xush kelibsiz!\n\n"
@@ -52,8 +55,8 @@ async def send_welcome(message: types.Message):
         reply_markup=keyboard
     )
 
-# Yordam komandasi
-@dp.message_handler(commands=['help'])
+# /help komandasi
+@dp.message(Command("help"))
 async def send_help(message: types.Message):
     await message.reply(
         "🤖 Botdan foydalanish:\n\n"
@@ -66,9 +69,17 @@ async def send_help(message: types.Message):
         "3. Quiz oxirida natijangizni ko'rasiz"
     )
 
-# Quiz boshlash
-@dp.callback_query_handler(lambda c: c.data == "start_quiz")
-@dp.message_handler(commands=['quiz'])
+# /quiz komandasi
+@dp.message(Command("quiz"))
+async def start_quiz_command(message: types.Message):
+    await start_quiz(message)
+
+# Start quiz callback
+@dp.callback_query(F.data == "start_quiz")
+async def start_quiz_callback(callback: CallbackQuery):
+    await callback.answer()
+    await start_quiz(callback.message)
+
 async def start_quiz(message: types.Message):
     user_id = message.from_user.id
     user_states[user_id] = {
@@ -80,7 +91,11 @@ async def start_quiz(message: types.Message):
     await send_question(user_id, message.chat.id)
 
 async def send_question(user_id, chat_id):
-    state = user_states[user_id]
+    state = user_states.get(user_id)
+    if not state:
+        await bot.send_message(chat_id, "Iltimos, avval /start ni bosing")
+        return
+    
     question_index = state['current_question']
     
     if question_index >= state['total_questions']:
@@ -89,7 +104,7 @@ async def send_question(user_id, chat_id):
     
     question = QUIZ_DATA[question_index]
     
-    # Audio yuborish (hozircha faqat matn)
+    # Savol matni
     await bot.send_message(
         chat_id,
         f"🎵 Savol {question_index + 1}/{state['total_questions']}\n\n"
@@ -98,44 +113,62 @@ async def send_question(user_id, chat_id):
     )
     
     # Variantlar tugmalari
-    keyboard = InlineKeyboardMarkup(row_width=2)
+    buttons = []
     for i, option in enumerate(question['options']):
-        keyboard.insert(InlineKeyboardButton(option, callback_data=f"answer_{question_index}_{i}"))
+        buttons.append([InlineKeyboardButton(
+            text=option, 
+            callback_data=f"answer_{question_index}_{i}"
+        )])
     
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await bot.send_message(chat_id, "Variantlardan birini tanlang:", reply_markup=keyboard)
 
 # Javobni tekshirish
-@dp.callback_query_handler(lambda c: c.data.startswith('answer_'))
-async def check_answer(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    _, question_index, answer_index = callback_query.data.split('_')
+@dp.callback_query(F.data.startswith('answer_'))
+async def check_answer(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    data_parts = callback.data.split('_')
+    
+    if len(data_parts) != 3:
+        await callback.answer("Xatolik yuz berdi")
+        return
+    
+    _, question_index, answer_index = data_parts
     question_index = int(question_index)
     answer_index = int(answer_index)
     
     if user_id not in user_states:
-        await callback_query.answer("Quiz hozir boshlanmagan. /start ni bosing")
+        await callback.answer("Quiz hozir boshlanmagan. /start ni bosing", show_alert=True)
+        return
+    
+    if question_index >= len(QUIZ_DATA):
+        await callback.answer("Savol topilmadi", show_alert=True)
         return
     
     question = QUIZ_DATA[question_index]
     
+    # Javobni tekshirish
     if answer_index == question['correct_answer']:
         user_states[user_id]['score'] += 1
-        await callback_query.answer("✅ To'g'ri!", show_alert=True)
+        await callback.answer("✅ To'g'ri!", show_alert=True)
     else:
         correct_answer = question['options'][question['correct_answer']]
-        await callback_query.answer(f"❌ Noto'g'ri! To'g'ri javob: {correct_answer}", show_alert=True)
+        await callback.answer(f"❌ Noto'g'ri! To'g'ri javob: {correct_answer}", show_alert=True)
     
     # Keyingi savolga o'tish
     user_states[user_id]['current_question'] += 1
-    await send_question(user_id, callback_query.message.chat.id)
+    await send_question(user_id, callback.message.chat.id)
 
 # Quizni tugatish
 async def finish_quiz(user_id, chat_id):
-    state = user_states[user_id]
+    state = user_states.get(user_id)
+    if not state:
+        return
+    
     score = state['score']
     total = state['total_questions']
     
-    percentage = (score / total) * 100
+    percentage = (score / total) * 100 if total > 0 else 0
     
     if percentage >= 80:
         message = "🎉 Ajoyib natija! Siz musiqadan juda yaxshi tushunasiz!"
@@ -156,13 +189,19 @@ async def finish_quiz(user_id, chat_id):
     # Foydalanuvchi holatini tozalash
     user_states.pop(user_id, None)
 
-# Audio fayllarni qabul qilish (keyingi bosqichda rivojlantiriladi)
-@dp.message_handler(content_types=['audio', 'voice'])
+# Help callback
+@dp.callback_query(F.data == "help")
+async def help_callback(callback: CallbackQuery):
+    await callback.answer()
+    await send_help(callback.message)
+
+# Audio fayllarni qabul qilish
+@dp.message(F.audio | F.voice)
 async def handle_audio(message: types.Message):
     await message.reply("🎵 Audio qabul qilindi! Bu funksiya keyingi yangilanishda qo'shiladi.")
 
-# Xabar yuborish
-@dp.message_handler()
+# Boshqa xabarlarga javob
+@dp.message()
 async def echo_message(message: types.Message):
     await message.answer(
         "Men audio quiz botiman. Quizni boshlash uchun /quiz ni bosing yoki "
@@ -170,6 +209,8 @@ async def echo_message(message: types.Message):
     )
 
 # Botni ishga tushirish
+async def main():
+    await dp.start_polling(bot)
+
 if __name__ == '__main__':
-    from aiogram import executor
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
