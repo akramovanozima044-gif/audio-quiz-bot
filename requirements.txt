@@ -3,3 +3,4 @@ python-dotenv==1.0.0
 sqlalchemy==2.0.23
 pydub==0.25.1
 aiofiles==23.2.1
+aiohttp==3.9.1
