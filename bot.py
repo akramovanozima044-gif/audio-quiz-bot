@@ -1194,22 +1194,6 @@ async def handle_audio(message: types.Message):
         "Hozircha faqat demo quiz ishlaydi."
     )
 
-# Boshqa xabarlarga javob
-@dp.message()
-async def echo_message(message: types.Message):
-    """Boshqa xabarlar"""
-    user_id = message.from_user.id
-    
-    if not is_user_allowed(user_id) and not is_admin(user_id):
-        await message.reply(
-            "❌ Botdan foydalanish uchun ruxsat talab qilinadi!\n\n"
-            "Ruxsat so'rash uchun /start ni bosing."
-        )
-    else:
-        await message.answer(
-            "Quizni boshlash uchun /quiz ni bosing.\n"
-            "Yordam olish uchun /help ni bosing."
-        )
 
 
 
@@ -1867,6 +1851,24 @@ async def list_tests_callback(callback: CallbackQuery):
     )
     
     await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+
+# Boshqa xabarlarga javob
+@dp.message()
+async def echo_message(message: types.Message):
+    """Boshqa xabarlar"""
+    user_id = message.from_user.id
+    
+    if not is_user_allowed(user_id) and not is_admin(user_id):
+        await message.reply(
+            "❌ Botdan foydalanish uchun ruxsat talab qilinadi!\n\n"
+            "Ruxsat so'rash uchun /start ni bosing."
+        )
+    else:
+        await message.answer(
+            "Quizni boshlash uchun /quiz ni bosing.\n"
+            "Yordam olish uchun /help ni bosing."
+        )
+
 
 # ============= BOTNI ISHGA TUSHIRISH =============
 async def on_startup():
