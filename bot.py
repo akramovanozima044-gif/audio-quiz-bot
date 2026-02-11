@@ -88,30 +88,6 @@ pending_requests = {}
 # Kitoblar va testlar bazasi
 books_db = {}
 
-def load_books_db():
-    """Kitoblar ma'lumotlarini yuklash"""
-    global books_db
-    try:
-        if os.path.exists(BOOKS_DB_FILE):
-            with open(BOOKS_DB_FILE, 'r', encoding='utf-8') as f:
-                books_db = json.load(f)
-            logger.info(f"✅ {len(books_db)} ta kitob ma'lumotlari yuklandi")
-        else:
-            books_db = {}
-            save_books_db()
-            logger.info("🆕 Yangi kitoblar bazasi yaratildi")
-    except Exception as e:
-        logger.error(f"❌ Kitoblarni yuklashda xatolik: {e}")
-        books_db = {}
-
-def save_books_db():
-    """Kitoblar ma'lumotlarini saqlash"""
-    try:
-        with open(BOOKS_DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(books_db, f, ensure_ascii=False, indent=4)
-        logger.info(f"💾 {len(books_db)} ta kitob ma'lumotlari saqlandi")
-    except Exception as e:
-        logger.error(f"❌ Kitoblarni saqlashda xatolik: {e}")
 
 # ============= ADMIN TEKSHIRISH =============
 def admin_required(handler):
@@ -156,6 +132,34 @@ def save_users_db():
         logger.info(f"💾 {len(users_db)} ta foydalanuvchi ma'lumotlari saqlandi")
     except Exception as e:
         logger.error(f"❌ Ma'lumotlarni saqlashda xatolik: {e}")
+
+
+def load_books_db():
+    """Kitoblar ma'lumotlarini yuklash"""
+    global books_db
+    try:
+        if os.path.exists(BOOKS_DB_FILE):
+            with open(BOOKS_DB_FILE, 'r', encoding='utf-8') as f:
+                books_db = json.load(f)
+            logger.info(f"✅ {len(books_db)} ta kitob ma'lumotlari yuklandi")
+        else:
+            books_db = {}
+            save_books_db()
+            logger.info("🆕 Yangi kitoblar bazasi yaratildi")
+    except Exception as e:
+        logger.error(f"❌ Kitoblarni yuklashda xatolik: {e}")
+        books_db = {}
+
+def save_books_db():
+    """Kitoblar ma'lumotlarini saqlash"""
+    try:
+        with open(BOOKS_DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(books_db, f, ensure_ascii=False, indent=4)
+        logger.info(f"💾 {len(books_db)} ta kitob ma'lumotlari saqlandi")
+    except Exception as e:
+        logger.error(f"❌ Kitoblarni saqlashda xatolik: {e}")
+
+
 
 def is_user_allowed(user_id):
     """Foydalanuvchi ruxsatini tekshirish"""
@@ -1207,32 +1211,7 @@ async def echo_message(message: types.Message):
             "Yordam olish uchun /help ni bosing."
         )
 
-# ============= BOTNI ISHGA TUSHIRISH =============
-async def on_startup():
-    """Bot ishga tushganda"""
-    logger.info("=" * 50)
-    logger.info("Audio Quiz Bot ishga tushmoqda...")
-    logger.info("=" * 50)
-    
-    # Ma'lumotlar bazasini yuklash
-    load_users_db()
-    
-    # Adminlarni tekshirish
-    logger.info(f"👨‍💼 Adminlar: {ADMIN_IDS}")
-    
-    # Webhook ni o'chirish
-    try:
-        await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("✅ Webhook o'chirildi")
-    except Exception as e:
-        logger.error(f"❌ Webhook o'chirishda xatolik: {e}")
-    
-    # Bot ma'lumotlari
-    bot_info = await bot.get_me()
-    logger.info(f"✅ Bot username: @{bot_info.username}")
-    logger.info(f"✅ Bot ismi: {bot_info.first_name}")
-    logger.info(f"✅ Bot ID: {bot_info.id}")
-    logger.info("=" * 50)
+
 
 
 
@@ -1888,6 +1867,33 @@ async def list_tests_callback(callback: CallbackQuery):
     )
     
     await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+
+# ============= BOTNI ISHGA TUSHIRISH =============
+async def on_startup():
+    """Bot ishga tushganda"""
+    logger.info("=" * 50)
+    logger.info("Audio Quiz Bot ishga tushmoqda...")
+    logger.info("=" * 50)
+    
+    # Ma'lumotlar bazasini yuklash
+    load_users_db()
+    
+    # Adminlarni tekshirish
+    logger.info(f"👨‍💼 Adminlar: {ADMIN_IDS}")
+    
+    # Webhook ni o'chirish
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("✅ Webhook o'chirildi")
+    except Exception as e:
+        logger.error(f"❌ Webhook o'chirishda xatolik: {e}")
+    
+    # Bot ma'lumotlari
+    bot_info = await bot.get_me()
+    logger.info(f"✅ Bot username: @{bot_info.username}")
+    logger.info(f"✅ Bot ismi: {bot_info.first_name}")
+    logger.info(f"✅ Bot ID: {bot_info.id}")
+    logger.info("=" * 50)
 
 # ============= TEST TIZIMINI ISHGA TUSHIRISH =============
 def init_test_system():
