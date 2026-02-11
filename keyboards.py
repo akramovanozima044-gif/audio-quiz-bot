@@ -14,8 +14,7 @@ def admin_main_menu():
             [KeyboardButton(text="📊 Umumiy natijalar")],
             [KeyboardButton(text="🔙 Orqaga")]
         ],
-        resize_keyboard=True,
-        one_time_keyboard=False
+        resize_keyboard=True
     )
 
 def user_main_menu():
@@ -26,10 +25,8 @@ def user_main_menu():
             [KeyboardButton(text="📊 Mening natijalarim")],
             [KeyboardButton(text="🔙 Orqaga")]
         ],
-        resize_keyboard=True,
-        one_time_keyboard=False
+        resize_keyboard=True
     )
-
 # ---------- INLINE TUGMALAR ----------
 
 def request_access_keyboard(user_id: int):

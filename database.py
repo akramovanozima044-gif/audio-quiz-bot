@@ -1,103 +1,124 @@
-# database.py - TO'LIQ TO'G'RILANGAN VERSIYA
-
-
-import os
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, DateTime, Text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, ForeignKey, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+import config
+import os
 
+# PostgreSQL uchun URL ni tuzatish (Railway uchun)
+if config.DATABASE_URL and config.DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = config.DATABASE_URL.replace("postgres://", "postgresql://", 1)
+else:
+    DATABASE_URL = config.DATABASE_URL or "sqlite:///./quiz.db"
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 class User(Base):
-    __tablename__ = 'users'
+    __tablename__ = "users"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, unique=True, nullable=False)
-    username = Column(String(100))
-    first_name = Column(String(100))
-    last_name = Column(String(100))
-    is_active = Column(Boolean, default=False)
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, unique=True, index=True)
+    username = Column(String, nullable=True)
+    first_name = Column(String)
+    last_name = Column(String, nullable=True)
     is_admin = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.now)
+    is_active = Column(Boolean, default=False)
+    requested_access = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
-    test_results = relationship("TestResult", back_populates="user")
+    # Aloqalar
+    results = relationship("QuizResult", back_populates="user")
+    
+    def __repr__(self):
+        return f"<User {self.user_id} - {self.username}>"
+
+class AdminRequest(Base):
+    __tablename__ = "admin_requests"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer)
+    username = Column(String)
+    requested_at = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, default="pending")  # pending, approved, rejected
+    
+    def __repr__(self):
+        return f"<AdminRequest {self.user_id} - {self.status}>"
 
 class Book(Base):
-    __tablename__ = 'books'
+    __tablename__ = "books"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(200), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
-    units = relationship("Unit", back_populates="book")
+    # Aloqalar
+    units = relationship("Unit", back_populates="book", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Book {self.name}>"
 
 class Unit(Base):
-    __tablename__ = 'units'
+    __tablename__ = "units"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    book_id = Column(Integer, ForeignKey('books.id'), nullable=False)
-    name = Column(String(200), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    book_id = Column(Integer, ForeignKey("books.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
     
+    # Aloqalar
     book = relationship("Book", back_populates="units")
-    questions = relationship("Question", back_populates="unit")
+    questions = relationship("Question", back_populates="unit", cascade="all, delete-orphan")
+    
+    def __repr__(self):
+        return f"<Unit {self.name}>"
 
 class Question(Base):
-    __tablename__ = 'questions'
+    __tablename__ = "questions"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    unit_id = Column(Integer, ForeignKey('units.id'), nullable=False)
-    audio_file = Column(String(500), nullable=False)
-    options = Column(Text, nullable=False)
-    correct_answer = Column(String(200), nullable=False)
-    created_at = Column(DateTime, default=datetime.now)
+    id = Column(Integer, primary_key=True, index=True)
+    unit_id = Column(Integer, ForeignKey("units.id"))
+    audio_file = Column(String)  # Audio fayl nomi
+    options = Column(Text)  # JSON formatda variantlar
+    correct_answer = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
+    # Aloqalar
     unit = relationship("Unit", back_populates="questions")
+    
+    def __repr__(self):
+        return f"<Question {self.id}>"
 
-class TestResult(Base):
-    __tablename__ = 'test_results'
+class QuizResult(Base):
+    __tablename__ = "quiz_results"
     
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=False)
-    book_id = Column(Integer, ForeignKey('books.id'), nullable=False)
-    unit_id = Column(Integer, ForeignKey('units.id'), nullable=False)
-    score = Column(Integer, default=0)
-    total_questions = Column(Integer, default=0)
-    completed_at = Column(DateTime, default=datetime.now)
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    book_id = Column(Integer, ForeignKey("books.id"))
+    unit_id = Column(Integer, ForeignKey("units.id"))
+    score = Column(Integer)
+    total_questions = Column(Integer)
+    completed_at = Column(DateTime, default=datetime.utcnow)
     
-    user = relationship("User", back_populates="test_results")
+    # Aloqalar
+    user = relationship("User", back_populates="results")
+    
+    def __repr__(self):
+        return f"<QuizResult {self.user_id} - {self.score}/{self.total_questions}>"
 
-# Database engine
-async def init_db():
-    DATABASE_URL = os.getenv("DATABASE_URL")
-    
-    if DATABASE_URL:
-        if DATABASE_URL.startswith("postgresql://"):
-            DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-    else:
-        DATABASE_URL = "sqlite+aiosqlite:///database.db"
-    
-    engine = create_async_engine(DATABASE_URL, echo=True)
-    
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    return engine
+# Database yaratish
+def init_db():
+    Base.metadata.create_all(bind=engine)
+    print("✅ Database yaratildi/tayyor")
 
-# Global session factory
-async def get_session():
-    DATABASE_URL = os.getenv("DATABASE_URL")
-    
-    if DATABASE_URL:
-        if DATABASE_URL.startswith("postgresql://"):
-            DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-    else:
-        DATABASE_URL = "sqlite+aiosqlite:///database.db"
-    
-    engine = create_async_engine(DATABASE_URL, echo=True)
-    async_session = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    return async_session
+def get_db():
+    """Database session yaratish generatori"""
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Avtomatik init
+init_db()
