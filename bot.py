@@ -1,7 +1,8 @@
 import os
 import logging
 import asyncio
-import sys
+import json
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -10,8 +11,10 @@ from aiogram import F
 # Token olish
 TOKEN = os.environ.get('BOT_TOKEN')
 
+# Admin ID lari - o'zingizning Telegram ID ni qo'ying
+ADMIN_IDS = [7923179229]  # BU YERGA O'ZINGIZNING TELEGRAM ID NI YOZING
+
 if not TOKEN:
-    # Local development uchun .env faylidan o'qish
     try:
         from dotenv import load_dotenv
         load_dotenv()
@@ -21,8 +24,7 @@ if not TOKEN:
 
 if not TOKEN:
     print("❌ XATO: BOT_TOKEN topilmadi!")
-    print("Iltimos, Railway da BOT_TOKEN environment variable ni o'rnating")
-    sys.exit(1)
+    exit(1)
 
 # Logging sozlash
 logging.basicConfig(
@@ -35,7 +37,364 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# Quiz ma'lumotlari
+# ============= RUXSATNOMA TIZIMI =============
+# Foydalanuvchilar ma'lumotlar bazasi (JSON fayl)
+USERS_DB_FILE = 'users_db.json'
+
+# Foydalanuvchilar holati
+users_db = {}
+pending_requests = {}  # Kutilayotgan so'rovlar
+
+def load_users_db():
+    """Foydalanuvchilar ma'lumotlarini yuklash"""
+    global users_db
+    try:
+        if os.path.exists(USERS_DB_FILE):
+            with open(USERS_DB_FILE, 'r', encoding='utf-8') as f:
+                users_db = json.load(f)
+            logger.info(f"✅ {len(users_db)} ta foydalanuvchi ma'lumotlari yuklandi")
+        else:
+            users_db = {}
+            logger.info("🆕 Yangi ma'lumotlar bazasi yaratildi")
+    except Exception as e:
+        logger.error(f"❌ Ma'lumotlarni yuklashda xatolik: {e}")
+        users_db = {}
+
+def save_users_db():
+    """Foydalanuvchilar ma'lumotlarini saqlash"""
+    try:
+        with open(USERS_DB_FILE, 'w', encoding='utf-8') as f:
+            json.dump(users_db, f, ensure_ascii=False, indent=4)
+        logger.info(f"💾 {len(users_db)} ta foydalanuvchi ma'lumotlari saqlandi")
+    except Exception as e:
+        logger.error(f"❌ Ma'lumotlarni saqlashda xatolik: {e}")
+
+def is_user_allowed(user_id):
+    """Foydalanuvchi ruxsatini tekshirish"""
+    return str(user_id) in users_db and users_db[str(user_id)]['allowed']
+
+def is_admin(user_id):
+    """Foydalanuvchi admin ekanligini tekshirish"""
+    return user_id in ADMIN_IDS
+
+def add_user(user_id, username, first_name, last_name):
+    """Yangi foydalanuvchi qo'shish"""
+    user_id_str = str(user_id)
+    users_db[user_id_str] = {
+        'user_id': user_id,
+        'username': username,
+        'first_name': first_name,
+        'last_name': last_name,
+        'joined_date': datetime.now().isoformat(),
+        'allowed': False,  # Avval ruxsat yo'q
+        'is_active': True,
+        'quizzes_played': 0,
+        'total_score': 0
+    }
+    save_users_db()
+    logger.info(f"👤 Yangi foydalanuvchi qo'shildi: @{username} ({user_id})")
+
+def approve_user(user_id):
+    """Foydalanuvchiga ruxsat berish"""
+    user_id_str = str(user_id)
+    if user_id_str in users_db:
+        users_db[user_id_str]['allowed'] = True
+        users_db[user_id_str]['approved_date'] = datetime.now().isoformat()
+        save_users_db()
+        logger.info(f"✅ Foydalanuvchiga ruxsat berildi: {user_id}")
+        return True
+    return False
+
+def reject_user(user_id):
+    """Foydalanuvchini rad etish"""
+    user_id_str = str(user_id)
+    if user_id_str in users_db:
+        users_db[user_id_str]['allowed'] = False
+        users_db[user_id_str]['rejected_date'] = datetime.now().isoformat()
+        save_users_db()
+        logger.info(f"❌ Foydalanuvchi rad etildi: {user_id}")
+        return True
+    return False
+
+def remove_user(user_id):
+    """Foydalanuvchini o'chirish"""
+    user_id_str = str(user_id)
+    if user_id_str in users_db:
+        del users_db[user_id_str]
+        save_users_db()
+        logger.info(f"🗑️ Foydalanuvchi o'chirildi: {user_id}")
+        return True
+    return False
+
+def update_user_stats(user_id, score=0):
+    """Foydalanuvchi statistikasini yangilash"""
+    user_id_str = str(user_id)
+    if user_id_str in users_db:
+        users_db[user_id_str]['quizzes_played'] += 1
+        users_db[user_id_str]['total_score'] += score
+        save_users_db()
+
+# ============= RUXSAT TEKSHIRISH DECORATOR =============
+def access_required(handler):
+    """Foydalanuvchi ruxsatini tekshirish decoratori"""
+    async def wrapper(message: types.Message):
+        user_id = message.from_user.id
+        
+        # Adminlar har doim ruxsat
+        if is_admin(user_id):
+            return await handler(message)
+        
+        # Ruxsat tekshirish
+        if not is_user_allowed(user_id):
+            # Ruxsat so'rovi yuborilganmi tekshirish
+            if user_id in pending_requests:
+                await message.reply(
+                    "⏳ Sizning so'rovingiz admin tomonidan ko'rib chiqilmoqda.\n"
+                    "Iltimos, biroz kuting..."
+                )
+            else:
+                # Ruxsat so'rovi yuborish
+                await request_access(message)
+            return
+        
+        # Ruxsat berilgan - handler ni ishga tushirish
+        return await handler(message)
+    return wrapper
+
+# ============= RUXSAT SO'ROVI =============
+async def request_access(message: types.Message):
+    """Admin ga ruxsat so'rovi yuborish"""
+    user = message.from_user
+    user_id = user.id
+    
+    # Foydalanuvchi ma'lumotlarini saqlash
+    if str(user_id) not in users_db:
+        add_user(user_id, user.username, user.first_name, user.last_name)
+    
+    # So'rovni yuborganini belgilash
+    pending_requests[user_id] = True
+    
+    # Admin uchun tugmalar
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Ruxsat berish", callback_data=f"approve_{user_id}"),
+                InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reject_{user_id}")
+            ],
+            [
+                InlineKeyboardButton(text="👤 Profil", callback_data=f"profile_{user_id}")
+            ]
+        ]
+    )
+    
+    # Foydalanuvchi ma'lumotlari
+    user_info = (
+        f"🆕 **Yangi foydalanuvchi**\n\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"👤 Ism: {user.first_name}\n"
+    )
+    
+    if user.last_name:
+        user_info += f"👥 Familiya: {user.last_name}\n"
+    if user.username:
+        user_info += f"📱 Username: @{user.username}\n"
+    
+    user_info += f"📅 Sana: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    
+    # Barcha adminlarga xabar yuborish
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id,
+                user_info,
+                reply_markup=keyboard,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"❌ Admin {admin_id} ga xabar yuborilmadi: {e}")
+    
+    # Foydalanuvchiga xabar
+    await message.reply(
+        "👋 Xush kelibsiz!\n\n"
+        "📝 Botdan foydalanish uchun admin ruxsati talab qilinadi.\n"
+        "✅ Sizning so'rovingiz adminga yuborildi.\n"
+        "⏳ Iltimos, tasdiqlashni kuting...",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Holatni tekshirish", callback_data="check_status")]
+            ]
+        )
+    )
+
+# ============= ADMIN CALLBACKLAR =============
+@dp.callback_query(F.data.startswith('approve_'))
+async def approve_callback(callback: CallbackQuery):
+    """Foydalanuvchiga ruxsat berish"""
+    admin_id = callback.from_user.id
+    
+    # Admin tekshirish
+    if not is_admin(admin_id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split('_')[1])
+    
+    # Ruxsat berish
+    if approve_user(user_id):
+        await callback.answer("✅ Ruxsat berildi!", show_alert=True)
+        
+        # Xabarni yangilash
+        await callback.message.edit_text(
+            callback.message.text + "\n\n✅ **Ruxsat berildi!**",
+            parse_mode='Markdown'
+        )
+        
+        # Foydalanuvchiga xabar yuborish
+        try:
+            await bot.send_message(
+                user_id,
+                "✅ **Tabriklaymiz!**\n\n"
+                "Sizga botdan foydalanish uchun ruxsat berildi.\n"
+                "Botdan to'liq foydalanishingiz mumkin.\n\n"
+                "Boshlash uchun /quiz buyrug'ini yuboring yoki /start ni bosing.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"❌ Foydalanuvchiga xabar yuborilmadi: {e}")
+    else:
+        await callback.answer("❌ Foydalanuvchi topilmadi!", show_alert=True)
+    
+    # So'rovni o'chirish
+    if user_id in pending_requests:
+        del pending_requests[user_id]
+
+@dp.callback_query(F.data.startswith('reject_'))
+async def reject_callback(callback: CallbackQuery):
+    """Foydalanuvchini rad etish"""
+    admin_id = callback.from_user.id
+    
+    if not is_admin(admin_id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split('_')[1])
+    
+    # Rad etish
+    if reject_user(user_id):
+        await callback.answer("❌ Rad etildi!", show_alert=True)
+        
+        # Xabarni yangilash
+        await callback.message.edit_text(
+            callback.message.text + "\n\n❌ **Rad etildi!**",
+            parse_mode='Markdown'
+        )
+        
+        # Foydalanuvchiga xabar yuborish
+        try:
+            await bot.send_message(
+                user_id,
+                "❌ **Afsus!**\n\n"
+                "Sizning so'rovingiz rad etildi.\n"
+                "Agar bu xato bo'lsa, admin bilan bog'lanishingiz mumkin.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            logger.error(f"❌ Foydalanuvchiga xabar yuborilmadi: {e}")
+    else:
+        await callback.answer("❌ Foydalanuvchi topilmadi!", show_alert=True)
+    
+    # So'rovni o'chirish
+    if user_id in pending_requests:
+        del pending_requests[user_id]
+
+@dp.callback_query(F.data == "check_status")
+async def check_status_callback(callback: CallbackQuery):
+    """Foydalanuvchi holatini tekshirish"""
+    user_id = callback.from_user.id
+    
+    if is_user_allowed(user_id):
+        await callback.answer("✅ Sizga ruxsat berilgan!", show_alert=True)
+        await callback.message.edit_text(
+            "✅ **Ruxsat berilgan!**\n\n"
+            "Botdan to'liq foydalanishingiz mumkin.\n"
+            "Boshlash uchun /quiz ni bosing."
+        )
+    elif str(user_id) in users_db:
+        if user_id in pending_requests:
+            await callback.answer("⏳ So'rovingiz ko'rib chiqilmoqda...", show_alert=True)
+        else:
+            await callback.answer("❌ Sizga ruxsat berilmagan!", show_alert=True)
+    else:
+        await callback.answer("❌ Siz ro'yxatdan o'tmagansiz!", show_alert=True)
+        await request_access(callback.message)
+
+# ============= ADMIN PANEL =============
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message):
+    """Admin panel"""
+    user_id = message.from_user.id
+    
+    if not is_admin(user_id):
+        await message.reply("❌ Siz admin emassiz!")
+        return
+    
+    # Statistika
+    total_users = len(users_db)
+    allowed_users = sum(1 for u in users_db.values() if u['allowed'])
+    pending_count = len(pending_requests)
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
+            [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin_users")],
+            [InlineKeyboardButton(text="⏳ Kutilayotgan so'rovlar", callback_data="admin_pending")],
+            [InlineKeyboardButton(text="🗑️ Foydalanuvchi o'chirish", callback_data="admin_remove")],
+            [InlineKeyboardButton(text="📨 Xabar yuborish", callback_data="admin_broadcast")]
+        ]
+    )
+    
+    await message.reply(
+        f"👨‍💼 **Admin Panel**\n\n"
+        f"📊 **Statistika:**\n"
+        f"👥 Umumiy foydalanuvchilar: {total_users}\n"
+        f"✅ Ruxsat berilgan: {allowed_users}\n"
+        f"⏳ Kutilayotgan so'rovlar: {pending_count}\n"
+        f"❌ Ruxsat berilmagan: {total_users - allowed_users}\n\n"
+        f"🆔 Admin ID: {user_id}",
+        reply_markup=keyboard,
+        parse_mode='Markdown'
+    )
+
+@dp.callback_query(F.data == "admin_stats")
+async def admin_stats_callback(callback: CallbackQuery):
+    """Admin statistikasi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    total_users = len(users_db)
+    allowed_users = sum(1 for u in users_db.values() if u['allowed'])
+    today_users = sum(1 for u in users_db.values() 
+                     if u['joined_date'].startswith(datetime.now().strftime('%Y-%m-%d')))
+    
+    stats_text = (
+        f"📊 **Bot statistikasi**\n\n"
+        f"👥 **Foydalanuvchilar:**\n"
+        f"• Umumiy: {total_users}\n"
+        f"• Ruxsat berilgan: {allowed_users}\n"
+        f"• Ruxsat berilmagan: {total_users - allowed_users}\n"
+        f"• Bugun qo'shilgan: {today_users}\n\n"
+        f"🎮 **O'yinlar:**\n"
+        f"• Jami o'yinlar: {sum(u['quizzes_played'] for u in users_db.values())}\n"
+        f"• Jami ball: {sum(u['total_score'] for u in users_db.values())}\n"
+        f"• O'rtacha ball: {sum(u['total_score'] for u in users_db.values()) / max(total_users, 1):.1f}\n\n"
+        f"⏳ Kutilayotgan so'rovlar: {len(pending_requests)}"
+    )
+    
+    await callback.message.edit_text(stats_text, parse_mode='Markdown')
+    await callback.answer()
+
+# ============= QUIZ FUNKSIYALARI (faqat ruxsat berilganlar uchun) =============
 QUIZ_DATA = [
     {
         "question": "Bu qaysi qo'shiq?",
@@ -51,67 +410,67 @@ QUIZ_DATA = [
     }
 ]
 
-# Foydalanuvchilarning holati
-user_states = {}
+# Foydalanuvchilarning quiz holati
+user_quiz_states = {}
 
-# /start komandasi
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Quizni boshlash 🎵", callback_data="start_quiz")],
-            [InlineKeyboardButton(text="Yordam ℹ️", callback_data="help")]
-        ]
-    )
-    
-    await message.reply(
-        "🎧 Audio Quiz Botga xush kelibsiz!\n\n"
-        "Bu bot orqali musiqa bilimingizni sinab ko'rishingiz mumkin. "
-        "Quiz davomida sizga audio fragmentlar beriladi va siz to'g'ri javobni topishingiz kerak.",
-        reply_markup=keyboard
-    )
-
-# /help komandasi
-@dp.message(Command("help"))
-async def send_help(message: types.Message):
-    await message.reply(
-        "🤖 Botdan foydalanish:\n\n"
-        "/start - Botni ishga tushirish\n"
-        "/quiz - Yangi quiz boshlash\n"
-        "/help - Yordam olish\n\n"
-        "📌 Quiz qoidalari:\n"
-        "1. Har bir savol uchun audio eshitasiz\n"
-        "2. 4 ta variantdan to'g'ri javobni tanlang\n"
-        "3. Quiz oxirida natijangizni ko'rasiz"
-    )
-
-# /quiz komandasi
-@dp.message(Command("quiz"))
-async def start_quiz_command(message: types.Message):
     user_id = message.from_user.id
-    user_states[user_id] = {
+    
+    # Admin uchun maxsus xabar
+    if is_admin(user_id):
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Admin panel", callback_data="admin_panel")],
+                [InlineKeyboardButton(text="Quizni boshlash", callback_data="start_quiz")]
+            ]
+        )
+        await message.reply(
+            "👨‍💼 **Admin paneliga xush kelibsiz!**\n\n"
+            "Siz admin sifatida barcha funksiyalardan foydalana olasiz.",
+            reply_markup=keyboard,
+            parse_mode='Markdown'
+        )
+        return
+    
+    # Oddiy foydalanuvchilar
+    if is_user_allowed(user_id):
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Quizni boshlash 🎵", callback_data="start_quiz")]
+            ]
+        )
+        await message.reply(
+            "🎧 Audio Quiz Botga xush kelibsiz!\n\n"
+            "Quizni boshlash uchun tugmani bosing yoki /quiz buyrug'ini yuboring.",
+            reply_markup=keyboard
+        )
+    else:
+        # Ruxsat so'rovi
+        await request_access(message)
+
+@dp.message(Command("quiz"))
+@access_required
+async def start_quiz_command(message: types.Message):
+    """Quiz boshlash - faqat ruxsat berilganlar uchun"""
+    user_id = message.from_user.id
+    
+    if user_id in user_quiz_states:
+        # Agar quiz davom etayotgan bo'lsa
+        await message.reply("Sizda davom etayotgan quiz bor! Avval uni tugating.")
+        return
+    
+    user_quiz_states[user_id] = {
         'current_question': 0,
         'score': 0,
         'total_questions': len(QUIZ_DATA)
     }
     await send_question(user_id, message.chat.id)
 
-# Start quiz callback
-@dp.callback_query(F.data == "start_quiz")
-async def start_quiz_callback(callback: CallbackQuery):
-    await callback.answer()
-    user_id = callback.from_user.id
-    user_states[user_id] = {
-        'current_question': 0,
-        'score': 0,
-        'total_questions': len(QUIZ_DATA)
-    }
-    await send_question(user_id, callback.message.chat.id)
-
 async def send_question(user_id, chat_id):
-    state = user_states.get(user_id)
+    """Savol yuborish"""
+    state = user_quiz_states.get(user_id)
     if not state:
-        await bot.send_message(chat_id, "Iltimos, avval /start ni bosing")
         return
     
     question_index = state['current_question']
@@ -122,7 +481,6 @@ async def send_question(user_id, chat_id):
     
     question = QUIZ_DATA[question_index]
     
-    # Savol matni
     await bot.send_message(
         chat_id,
         f"🎵 Savol {question_index + 1}/{state['total_questions']}\n\n"
@@ -141,12 +499,21 @@ async def send_question(user_id, chat_id):
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await bot.send_message(chat_id, "Variantlardan birini tanlang:", reply_markup=keyboard)
 
-# Javobni tekshirish
 @dp.callback_query(F.data.startswith('answer_'))
 async def check_answer(callback: CallbackQuery):
+    """Javobni tekshirish"""
     user_id = callback.from_user.id
-    data_parts = callback.data.split('_')
     
+    # Ruxsat tekshirish
+    if not is_user_allowed(user_id) and not is_admin(user_id):
+        await callback.answer("❌ Sizga ruxsat berilmagan!", show_alert=True)
+        return
+    
+    if user_id not in user_quiz_states:
+        await callback.answer("Quiz hozir boshlanmagan!", show_alert=True)
+        return
+    
+    data_parts = callback.data.split('_')
     if len(data_parts) != 3:
         await callback.answer("Xatolik yuz berdi")
         return
@@ -155,38 +522,34 @@ async def check_answer(callback: CallbackQuery):
     question_index = int(question_index)
     answer_index = int(answer_index)
     
-    if user_id not in user_states:
-        await callback.answer("Quiz hozir boshlanmagan. /start ni bosing", show_alert=True)
-        return
-    
     if question_index >= len(QUIZ_DATA):
-        await callback.answer("Savol topilmadi", show_alert=True)
+        await callback.answer("Savol topilmadi")
         return
     
     question = QUIZ_DATA[question_index]
     
-    # Javobni tekshirish
     if answer_index == question['correct_answer']:
-        user_states[user_id]['score'] += 1
+        user_quiz_states[user_id]['score'] += 1
         await callback.answer("✅ To'g'ri!", show_alert=True)
     else:
         correct_answer = question['options'][question['correct_answer']]
         await callback.answer(f"❌ Noto'g'ri! To'g'ri javob: {correct_answer}", show_alert=True)
     
-    # Keyingi savolga o'tish
-    user_states[user_id]['current_question'] += 1
+    user_quiz_states[user_id]['current_question'] += 1
     await send_question(user_id, callback.message.chat.id)
 
-# Quizni tugatish
 async def finish_quiz(user_id, chat_id):
-    state = user_states.get(user_id)
+    """Quizni tugatish"""
+    state = user_quiz_states.get(user_id)
     if not state:
         return
     
     score = state['score']
     total = state['total_questions']
-    
     percentage = (score / total) * 100 if total > 0 else 0
+    
+    # Statistika yangilash
+    update_user_stats(user_id, score)
     
     if percentage >= 80:
         message = "🎉 Ajoyib natija! Siz musiqadan juda yaxshi tushunasiz!"
@@ -204,88 +567,154 @@ async def finish_quiz(user_id, chat_id):
         f"Yana o'ynash uchun /quiz ni bosing"
     )
     
-    # Foydalanuvchi holatini tozalash
-    user_states.pop(user_id, None)
+    # Quiz holatini tozalash
+    if user_id in user_quiz_states:
+        del user_quiz_states[user_id]
 
-# Help callback
-@dp.callback_query(F.data == "help")
-async def help_callback(callback: CallbackQuery):
+@dp.callback_query(F.data == "start_quiz")
+async def start_quiz_callback(callback: CallbackQuery):
+    """Quiz boshlash callback"""
     await callback.answer()
-    await send_help(callback.message)
+    user_id = callback.from_user.id
+    
+    if not is_user_allowed(user_id) and not is_admin(user_id):
+        await callback.message.reply("❌ Sizga ruxsat berilmagan!")
+        return
+    
+    if user_id in user_quiz_states:
+        await callback.message.reply("Sizda davom etayotgan quiz bor! Avval uni tugating.")
+        return
+    
+    user_quiz_states[user_id] = {
+        'current_question': 0,
+        'score': 0,
+        'total_questions': len(QUIZ_DATA)
+    }
+    await send_question(user_id, callback.message.chat.id)
+
+# ============= BOSHQA KOMANDALAR =============
+@dp.message(Command("help"))
+async def send_help(message: types.Message):
+    """Yordam komandasi"""
+    user_id = message.from_user.id
+    
+    if not is_user_allowed(user_id) and not is_admin(user_id):
+        await message.reply("❌ Botdan foydalanish uchun ruxsat talab qilinadi!")
+        return
+    
+    help_text = (
+        "🤖 **Botdan foydalanish:**\n\n"
+        "/start - Botni ishga tushirish\n"
+        "/quiz - Yangi quiz boshlash\n"
+        "/profile - Profil ma'lumotlari\n"
+        "/help - Yordam olish\n\n"
+        "📌 **Quiz qoidalari:**\n"
+        "1. Har bir savol uchun audio eshitasiz\n"
+        "2. 4 ta variantdan to'g'ri javobni tanlang\n"
+        "3. Quiz oxirida natijangizni ko'rasiz"
+    )
+    
+    if is_admin(user_id):
+        help_text += "\n\n👨‍💼 **Admin komandalari:**\n/admin - Admin panel"
+    
+    await message.reply(help_text, parse_mode='Markdown')
+
+@dp.message(Command("profile"))
+@access_required
+async def show_profile(message: types.Message):
+    """Foydalanuvchi profilini ko'rsatish"""
+    user_id = message.from_user.id
+    user_id_str = str(user_id)
+    
+    if user_id_str in users_db:
+        user_data = users_db[user_id_str]
+        
+        profile_text = (
+            f"👤 **Sizning profilingiz**\n\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"👤 Ism: {user_data['first_name']}\n"
+        )
+        
+        if user_data.get('last_name'):
+            profile_text += f"👥 Familiya: {user_data['last_name']}\n"
+        if user_data.get('username'):
+            profile_text += f"📱 Username: @{user_data['username']}\n"
+        
+        profile_text += (
+            f"\n📅 Ro'yxatdan o'tgan: {user_data['joined_date'][:10]}\n"
+            f"✅ Ruxsat: {'Berilgan' if user_data['allowed'] else 'Berilmagan'}\n"
+            f"\n🎮 **Statistika:**\n"
+            f"📊 O'ynalgan quizlar: {user_data['quizzes_played']}\n"
+            f"🏆 Umumiy ball: {user_data['total_score']}"
+        )
+        
+        await message.reply(profile_text, parse_mode='Markdown')
+    else:
+        await message.reply("❌ Profil ma'lumotlari topilmadi!")
 
 # Audio fayllarni qabul qilish
 @dp.message(F.audio | F.voice)
+@access_required
 async def handle_audio(message: types.Message):
-    await message.reply("🎵 Audio qabul qilindi! Bu funksiya keyingi yangilanishda qo'shiladi.")
+    """Audio fayllarni qabul qilish"""
+    await message.reply(
+        "🎵 Audio qabul qilindi!\n\n"
+        "Bu funksiya keyingi yangilanishda qo'shiladi. "
+        "Hozircha faqat demo quiz ishlaydi."
+    )
 
 # Boshqa xabarlarga javob
 @dp.message()
 async def echo_message(message: types.Message):
-    await message.answer(
-        "Men audio quiz botiman. Quizni boshlash uchun /quiz ni bosing yoki "
-        "yordam olish uchun /help ni bosing.\n\n"
-        "Boshlash uchun /start ni bosing."
-    )
-
-async def cleanup_webhook():
-    """Webhook ni to'liq o'chirish"""
-    logger.info("Webhook ni o'chirish jarayoni boshlandi...")
+    """Boshqa xabarlar"""
+    user_id = message.from_user.id
     
-    try:
-        # Webhook ni o'chirish
-        await bot.delete_webhook(drop_pending_updates=True)
-        logger.info("✅ Webhook muvaffaqiyatli o'chirildi")
-        return True
-    except Exception as e:
-        logger.error(f"❌ Webhook o'chirishda xatolik: {e}")
-        return False
+    if not is_user_allowed(user_id) and not is_admin(user_id):
+        await message.reply(
+            "❌ Botdan foydalanish uchun ruxsat talab qilinadi!\n\n"
+            "Ruxsat so'rash uchun /start ni bosing."
+        )
+    else:
+        await message.answer(
+            "Quizni boshlash uchun /quiz ni bosing.\n"
+            "Yordam olish uchun /help ni bosing."
+        )
 
-async def main():
+# ============= BOTNI ISHGA TUSHIRISH =============
+async def on_startup():
+    """Bot ishga tushganda"""
     logger.info("=" * 50)
     logger.info("Audio Quiz Bot ishga tushmoqda...")
     logger.info("=" * 50)
     
-    # 1. Webhook ni majburiy o'chirish
-    logger.info("1. Webhook ni o'chirish...")
-    success = await cleanup_webhook()
+    # Ma'lumotlar bazasini yuklash
+    load_users_db()
     
-    if not success:
-        logger.warning("Webhook o'chirishda muammo, qayta urinib ko'ramiz...")
-        # Qayta urinib ko'rish
-        await asyncio.sleep(2)
-        success = await cleanup_webhook()
-        
-        if not success:
-            logger.error("Webhook ni o'chirib bo'lmadi. Botni qayta ishga tushiring.")
-            return
+    # Adminlarni tekshirish
+    logger.info(f"👨‍💼 Adminlar: {ADMIN_IDS}")
     
-    # 2. Bot ma'lumotlarini olish
-    logger.info("2. Bot ma'lumotlarini olish...")
+    # Webhook ni o'chirish
     try:
-        bot_info = await bot.get_me()
-        logger.info(f"✅ Bot username: @{bot_info.username}")
-        logger.info(f"✅ Bot ismi: {bot_info.first_name}")
-        logger.info(f"✅ Bot ID: {bot_info.id}")
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("✅ Webhook o'chirildi")
     except Exception as e:
-        logger.error(f"❌ Bot ma'lumotlarini olishda xatolik: {e}")
-        return
+        logger.error(f"❌ Webhook o'chirishda xatolik: {e}")
     
-    # 3. Polling ni boshlash
-    logger.info("3. Polling ni boshlash...")
-    logger.info("✅ Bot muvaffaqiyatli ishga tushdi!")
+    # Bot ma'lumotlari
+    bot_info = await bot.get_me()
+    logger.info(f"✅ Bot username: @{bot_info.username}")
+    logger.info(f"✅ Bot ismi: {bot_info.first_name}")
+    logger.info(f"✅ Bot ID: {bot_info.id}")
     logger.info("=" * 50)
-    
-    try:
-        await dp.start_polling(bot, skip_updates=True)
-    except Exception as e:
-        logger.error(f"❌ Pollingda xatolik: {e}")
-    finally:
-        await bot.session.close()
+
+async def main():
+    await on_startup()
+    await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("Bot to'xtatildi (Ctrl+C)")
+        logger.info("🛑 Bot to'xtatildi")
     except Exception as e:
-        logger.error(f"Kutilmagan xatolik: {e}")
+        logger.error(f"❌ Kutilmagan xatolik: {e}")
