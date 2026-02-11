@@ -7,6 +7,9 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram import F
+import uuid
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 # Token olish
 TOKEN = os.environ.get('BOT_TOKEN')
@@ -832,7 +835,7 @@ async def admin_remove_callback(callback: CallbackQuery):
         )
     else:
         await callback.answer(f"❌ Foydalanuvchi topilmadi!", show_alert=True)
-        
+
 # ============= QUIZ FUNKSIYALARI (faqat ruxsat berilganlar uchun) =============
 QUIZ_DATA = [
     {
@@ -1145,6 +1148,9 @@ async def on_startup():
     logger.info(f"✅ Bot ismi: {bot_info.first_name}")
     logger.info(f"✅ Bot ID: {bot_info.id}")
     logger.info("=" * 50)
+
+# ============= TEST TIZIMINI ISHGA TUSHIRISH =============
+init_test_system()
 
 async def main():
     await on_startup()
