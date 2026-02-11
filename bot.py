@@ -2,15 +2,30 @@ import os
 import logging
 import asyncio
 import json
-from datetime import datetime
-from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from aiogram import F
 import uuid
+import ssl
+import certifi
+from datetime import datetime, timedelta
+from aiohttp import web
+from dotenv import load_dotenv
+
+# Aiogram importlari
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import Command
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    FSInputFile
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.session.aiohttp import AiohttpSession
+from aiogram.client.telegram import TelegramAPIServer
 
+# ============= FSM HOLATLARI =============
 class TestCreationStates(StatesGroup):
     # Kitob yaratish
     waiting_book_name = State()
@@ -33,15 +48,14 @@ class TestCreationStates(StatesGroup):
     waiting_correct_answer = State()
     waiting_explanation = State()
 
-# Token olish
+# ============= TOKEN VA KONFIGURATSIYA =============
 TOKEN = os.environ.get('BOT_TOKEN')
 
-# Admin ID lari - o'zingizning Telegram ID ni qo'ying
-ADMIN_IDS = [7923179229]  # BU YERGA O'ZINGIZNING TELEGRAM ID NI YOZING
+# Admin ID lari - O'ZINGIZNING TELEGRAM ID NI YOZING
+ADMIN_IDS = [7923179229]  # <--- Raqam shaklida, string emas!
 
 if not TOKEN:
     try:
-        from dotenv import load_dotenv
         load_dotenv()
         TOKEN = os.getenv('BOT_TOKEN')
     except ImportError:
@@ -49,6 +63,7 @@ if not TOKEN:
 
 if not TOKEN:
     print("❌ XATO: BOT_TOKEN topilmadi!")
+    print("Iltimos, Railway da BOT_TOKEN environment variable ni o'rnating")
     exit(1)
 
 # Logging sozlash
@@ -60,17 +75,15 @@ logger = logging.getLogger(__name__)
 
 # Bot va Dispatcher yaratish
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
 
-# ============= RUXSATNOMA TIZIMI =============
-# Foydalanuvchilar ma'lumotlar bazasi (JSON fayl)
+# ============= MA'LUMOTLAR BAZASI =============
 USERS_DB_FILE = 'users_db.json'
+BOOKS_DB_FILE = 'books_db.json'
 
 # Foydalanuvchilar holati
 users_db = {}
-pending_requests = {}  # Kutilayotgan so'rovlar
-
-BOOKS_DB_FILE = 'books_db.json'
+pending_requests = {}
 
 # Kitoblar va testlar bazasi
 books_db = {}
