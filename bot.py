@@ -5,14 +5,30 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram import F
-from dotenv import load_dotenv
+
 
 # Environment variables
-load_dotenv()
-TOKEN = os.getenv('BOT_TOKEN')
+TOKEN = os.environ.get('BOT_TOKEN')
+
+
+if not TOKEN:
+    # Local development uchun .env faylidan o'qish
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        TOKEN = os.getenv('BOT_TOKEN')
+    except ImportError:
+        pass
+
+if not TOKEN:
+    print("❌ XATO: BOT_TOKEN topilmadi!")
+    exit(1)
 
 # Logging sozlash
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Bot va Dispatcher yaratish
@@ -210,6 +226,22 @@ async def echo_message(message: types.Message):
 
 # Botni ishga tushirish
 async def main():
+    logger.info("Bot ishga tushmoqda...")
+    
+    # Avval webhook ni o'chirish
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        logger.info("Webhook muvaffaqiyatli o'chirildi")
+    except Exception as e:
+        logger.warning(f"Webhook o'chirishda xatolik: {e}")
+    
+    # Bot ma'lumotlarini olish
+    bot_info = await bot.get_me()
+    logger.info(f"Bot username: @{bot_info.username}")
+    logger.info(f"Bot ismi: {bot_info.first_name}")
+    logger.info(f"Bot ID: {bot_info.id}")
+    
+    # Polling ni boshlash
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
