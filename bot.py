@@ -331,7 +331,7 @@ async def check_status_callback(callback: CallbackQuery):
 # ============= ADMIN PANEL =============
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message):
-    """Admin panel"""
+    """Admin panel - asosiy menyu"""
     user_id = message.from_user.id
     
     if not is_admin(user_id):
@@ -346,54 +346,493 @@ async def admin_panel(message: types.Message):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="📊 Statistika", callback_data="admin_stats")],
-            [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="admin_users")],
+            [InlineKeyboardButton(text="👥 Foydalanuvchilar ro'yxati", callback_data="admin_users_list")],
             [InlineKeyboardButton(text="⏳ Kutilayotgan so'rovlar", callback_data="admin_pending")],
-            [InlineKeyboardButton(text="🗑️ Foydalanuvchi o'chirish", callback_data="admin_remove")],
-            [InlineKeyboardButton(text="📨 Xabar yuborish", callback_data="admin_broadcast")]
+            [InlineKeyboardButton(text="✅ Ruxsat berilganlar", callback_data="admin_allowed")],
+            [InlineKeyboardButton(text="❌ Ruxsat berilmaganlar", callback_data="admin_not_allowed")],
+            [InlineKeyboardButton(text="🗑️ Foydalanuvchi o'chirish", callback_data="admin_remove_menu")],
+            [InlineKeyboardButton(text="📢 Xabar yuborish", callback_data="admin_broadcast_menu")],
+            [InlineKeyboardButton(text="🔄 Ma'lumotlarni yangilash", callback_data="admin_refresh")]
         ]
     )
     
     await message.reply(
         f"👨‍💼 **Admin Panel**\n\n"
-        f"📊 **Statistika:**\n"
+        f"📊 **Umumiy statistika:**\n"
         f"👥 Umumiy foydalanuvchilar: {total_users}\n"
         f"✅ Ruxsat berilgan: {allowed_users}\n"
         f"⏳ Kutilayotgan so'rovlar: {pending_count}\n"
         f"❌ Ruxsat berilmagan: {total_users - allowed_users}\n\n"
-        f"🆔 Admin ID: {user_id}",
+        f"🆔 Admin ID: `{user_id}`\n"
+        f"🕐 So'ngi yangilanish: {datetime.now().strftime('%H:%M:%S')}",
         reply_markup=keyboard,
         parse_mode='Markdown'
     )
 
+# ============= ADMIN STATISTIKA =============
 @dp.callback_query(F.data == "admin_stats")
 async def admin_stats_callback(callback: CallbackQuery):
-    """Admin statistikasi"""
+    """Batafsil statistika"""
     if not is_admin(callback.from_user.id):
         await callback.answer("❌ Siz admin emassiz!", show_alert=True)
         return
     
     total_users = len(users_db)
     allowed_users = sum(1 for u in users_db.values() if u['allowed'])
+    
+    # Bugun qo'shilganlar
+    today = datetime.now().strftime('%Y-%m-%d')
     today_users = sum(1 for u in users_db.values() 
-                     if u['joined_date'].startswith(datetime.now().strftime('%Y-%m-%d')))
+                     if u.get('joined_date', '').startswith(today))
+    
+    # Hafta qo'shilganlar
+    from datetime import timedelta
+    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    week_users = sum(1 for u in users_db.values() 
+                    if u.get('joined_date', '')[:10] >= week_ago)
+    
+    # O'yin statistikasi
+    total_quizzes = sum(u.get('quizzes_played', 0) for u in users_db.values())
+    total_scores = sum(u.get('total_score', 0) for u in users_db.values())
+    avg_score = total_scores / max(total_users, 1)
+    
+    # Eng yaxshi natija
+    best_user = None
+    best_score = 0
+    for u in users_db.values():
+        if u.get('total_score', 0) > best_score:
+            best_score = u.get('total_score', 0)
+            best_user = u
     
     stats_text = (
-        f"📊 **Bot statistikasi**\n\n"
-        f"👥 **Foydalanuvchilar:**\n"
+        f"📊 **BATAFSIL STATISTIKA**\n\n"
+        f"👥 **FOYDALANUVCHILAR:**\n"
         f"• Umumiy: {total_users}\n"
         f"• Ruxsat berilgan: {allowed_users}\n"
         f"• Ruxsat berilmagan: {total_users - allowed_users}\n"
-        f"• Bugun qo'shilgan: {today_users}\n\n"
-        f"🎮 **O'yinlar:**\n"
-        f"• Jami o'yinlar: {sum(u['quizzes_played'] for u in users_db.values())}\n"
-        f"• Jami ball: {sum(u['total_score'] for u in users_db.values())}\n"
-        f"• O'rtacha ball: {sum(u['total_score'] for u in users_db.values()) / max(total_users, 1):.1f}\n\n"
-        f"⏳ Kutilayotgan so'rovlar: {len(pending_requests)}"
+        f"• Bugun qo'shilgan: {today_users}\n"
+        f"• Bu hafta qo'shilgan: {week_users}\n\n"
+        
+        f"🎮 **O'YIN STATISTIKASI:**\n"
+        f"• Jami o'yinlar: {total_quizzes}\n"
+        f"• Jami to'plangan ball: {total_scores}\n"
+        f"• O'rtacha ball: {avg_score:.1f}\n\n"
+        
+        f"🏆 **ENG YAXSHI NATIJA:**\n"
     )
     
-    await callback.message.edit_text(stats_text, parse_mode='Markdown')
+    if best_user:
+        stats_text += (
+            f"• Foydalanuvchi: {best_user.get('first_name', 'Noma\'lum')}\n"
+            f"• Ball: {best_score}\n"
+            f"• O'yinlar: {best_user.get('quizzes_played', 0)}\n"
+        )
+    else:
+        stats_text += "• Hali hech kim o'ynamagan\n"
+    
+    stats_text += f"\n⏳ Kutilayotgan so'rovlar: {len(pending_requests)}"
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")]
+        ]
+    )
+    
+    await callback.message.edit_text(stats_text, parse_mode='Markdown', reply_markup=keyboard)
     await callback.answer()
 
+
+# ============= FOYDALANUVCHILAR RO'YXATI =============
+@dp.callback_query(F.data == "admin_users_list")
+async def admin_users_list_callback(callback: CallbackQuery):
+    """Foydalanuvchilar ro'yxati"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    if not users_db:
+        await callback.answer("📭 Hali foydalanuvchilar yo'q", show_alert=True)
+        return
+    
+    # So'nggi 10 foydalanuvchi
+    users_list = list(users_db.values())
+    users_list.sort(key=lambda x: x.get('joined_date', ''), reverse=True)
+    
+    text = "👥 **SO'NGI FOYDALANUVCHILAR:**\n\n"
+    
+    for i, user in enumerate(users_list[:10], 1):
+        name = user.get('first_name', 'Noma\'lum')
+        username = f"@{user.get('username')}" if user.get('username') else 'No username'
+        allowed = "✅" if user.get('allowed') else "❌"
+        joined = user.get('joined_date', '')[5:16] if user.get('joined_date') else 'Noma\'lum'
+        
+        text += f"{i}. {allowed} {name} {username}\n"
+        text += f"   🆔 `{user.get('user_id')}` | 📅 {joined}\n"
+    
+    text += f"\n📊 Jami: {len(users_db)} ta foydalanuvchi"
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")]
+        ]
+    )
+    
+    await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+    await callback.answer()
+
+# ============= KUTILAYOTGAN SO'ROVLAR =============
+@dp.callback_query(F.data == "admin_pending")
+async def admin_pending_callback(callback: CallbackQuery):
+    """Kutilayotgan so'rovlar ro'yxati"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    if not pending_requests:
+        await callback.answer("⏳ Kutilayotgan so'rovlar yo'q", show_alert=True)
+        return
+    
+    text = "⏳ **KUTILAYOTGAN SO'ROVLAR:**\n\n"
+    
+    for user_id in list(pending_requests.keys())[:10]:
+        user_id_str = str(user_id)
+        if user_id_str in users_db:
+            user = users_db[user_id_str]
+            name = user.get('first_name', 'Noma\'lum')
+            username = f"@{user.get('username')}" if user.get('username') else 'No username'
+            joined = user.get('joined_date', '')[5:16] if user.get('joined_date') else 'Noma\'lum'
+            
+            text += f"• {name} {username}\n"
+            text += f"  🆔 `{user_id}` | 📅 {joined}\n\n"
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")]
+        ]
+    )
+    
+    await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+    await callback.answer()
+
+# ============= RUXSAT BERILGANLAR =============
+@dp.callback_query(F.data == "admin_allowed")
+async def admin_allowed_callback(callback: CallbackQuery):
+    """Ruxsat berilgan foydalanuvchilar"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    allowed_users_list = [u for u in users_db.values() if u.get('allowed')]
+    
+    if not allowed_users_list:
+        await callback.answer("✅ Ruxsat berilgan foydalanuvchilar yo'q", show_alert=True)
+        return
+    
+    allowed_users_list.sort(key=lambda x: x.get('approved_date', ''), reverse=True)
+    
+    text = "✅ **RUXSAT BERILGANLAR:**\n\n"
+    
+    for i, user in enumerate(allowed_users_list[:10], 1):
+        name = user.get('first_name', 'Noma\'lum')
+        username = f"@{user.get('username')}" if user.get('username') else 'No username'
+        approved = user.get('approved_date', '')[5:16] if user.get('approved_date') else 'Noma\'lum'
+        quizzes = user.get('quizzes_played', 0)
+        score = user.get('total_score', 0)
+        
+        text += f"{i}. {name} {username}\n"
+        text += f"   🆔 `{user.get('user_id')}` | 📅 {approved}\n"
+        text += f"   🎮 {quizzes} o'yin | 🏆 {score} ball\n\n"
+    
+    text += f"\n📊 Jami: {len(allowed_users_list)} ta foydalanuvchi"
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")]
+        ]
+    )
+    
+    await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+    await callback.answer()
+
+# ============= RUXSAT BERILMAGANLAR =============
+@dp.callback_query(F.data == "admin_not_allowed")
+async def admin_not_allowed_callback(callback: CallbackQuery):
+    """Ruxsat berilmagan foydalanuvchilar"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    not_allowed_users = [u for u in users_db.values() if not u.get('allowed')]
+    
+    if not not_allowed_users:
+        await callback.answer("❌ Ruxsat berilmagan foydalanuvchilar yo'q", show_alert=True)
+        return
+    
+    text = "❌ **RUXSAT BERILMAGANLAR:**\n\n"
+    
+    for i, user in enumerate(not_allowed_users[:10], 1):
+        name = user.get('first_name', 'Noma\'lum')
+        username = f"@{user.get('username')}" if user.get('username') else 'No username'
+        joined = user.get('joined_date', '')[5:16] if user.get('joined_date') else 'Noma\'lum'
+        
+        text += f"{i}. {name} {username}\n"
+        text += f"   🆔 `{user.get('user_id')}` | 📅 {joined}\n\n"
+    
+    text += f"\n📊 Jami: {len(not_allowed_users)} ta foydalanuvchi"
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")]
+        ]
+    )
+    
+    await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+    await callback.answer()
+
+# ============= FOYDALANUVCHI O'CHIRISH =============
+@dp.callback_query(F.data == "admin_remove_menu")
+async def admin_remove_menu_callback(callback: CallbackQuery):
+    """Foydalanuvchi o'chirish menyusi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    text = "🗑️ **FOYDALANUVCHI O'CHIRISH**\n\n"
+    text += "Foydalanuvchini o'chirish uchun uning ID sini kiriting:\n\n"
+    text += "Format: `/remove_user 123456789`"
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")]
+        ]
+    )
+    
+    await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+    await callback.answer()
+
+@dp.message(Command("remove_user"))
+async def remove_user_command(message: types.Message):
+    """Foydalanuvchini o'chirish"""
+    if not is_admin(message.from_user.id):
+        await message.reply("❌ Siz admin emassiz!")
+        return
+    
+    try:
+        user_id = int(message.text.split()[1])
+    except (IndexError, ValueError):
+        await message.reply("❌ Noto'g'ri format! `/remove_user 123456789`")
+        return
+    
+    if remove_user(user_id):
+        await message.reply(f"✅ Foydalanuvchi `{user_id}` o'chirildi!", parse_mode='Markdown')
+    else:
+        await message.reply(f"❌ Foydalanuvchi `{user_id}` topilmadi!", parse_mode='Markdown')
+
+# ============= XABAR YUBORISH =============
+@dp.callback_query(F.data == "admin_broadcast_menu")
+async def admin_broadcast_menu_callback(callback: CallbackQuery):
+    """Xabar yuborish menyusi"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    text = "📢 **XABAR YUBORISH**\n\n"
+    text += "Barcha foydalanuvchilarga xabar yuborish uchun:\n\n"
+    text += "Format: `/broadcast Xabaringiz`\n\n"
+    text += "Faqat ruxsat berilganlarga yuborish uchun:\n"
+    text += "Format: `/broadcast_allowed Xabaringiz`"
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")]
+        ]
+    )
+    
+    await callback.message.edit_text(text, parse_mode='Markdown', reply_markup=keyboard)
+    await callback.answer()
+
+@dp.message(Command("broadcast"))
+async def broadcast_command(message: types.Message):
+    """Barcha foydalanuvchilarga xabar yuborish"""
+    if not is_admin(message.from_user.id):
+        await message.reply("❌ Siz admin emassiz!")
+        return
+    
+    try:
+        broadcast_text = message.text.split(' ', 1)[1]
+    except IndexError:
+        await message.reply("❌ Xabar matnini kiriting! `/broadcast Salom hammaga!`")
+        return
+    
+    sent_count = 0
+    failed_count = 0
+    
+    status_msg = await message.reply("📤 Xabar yuborilmoqda...")
+    
+    for user_id_str, user_data in users_db.items():
+        try:
+            await bot.send_message(
+                int(user_id_str),
+                f"📢 **Admin xabari:**\n\n{broadcast_text}",
+                parse_mode='Markdown'
+            )
+            sent_count += 1
+            await asyncio.sleep(0.05)  # Rate limiting
+        except Exception as e:
+            failed_count += 1
+            logger.error(f"❌ Xabar yuborilmadi {user_id_str}: {e}")
+    
+    await status_msg.edit_text(
+        f"✅ Xabar yuborildi!\n\n"
+        f"📤 Yuborilgan: {sent_count}\n"
+        f"❌ Yuborilmagan: {failed_count}"
+    )
+
+@dp.message(Command("broadcast_allowed"))
+async def broadcast_allowed_command(message: types.Message):
+    """Faqat ruxsat berilgan foydalanuvchilarga xabar yuborish"""
+    if not is_admin(message.from_user.id):
+        await message.reply("❌ Siz admin emassiz!")
+        return
+    
+    try:
+        broadcast_text = message.text.split(' ', 1)[1]
+    except IndexError:
+        await message.reply("❌ Xabar matnini kiriting! `/broadcast_allowed Salom!`")
+        return
+    
+    sent_count = 0
+    failed_count = 0
+    
+    status_msg = await message.reply("📤 Xabar yuborilmoqda (faqat ruxsat berilganlarga)...")
+    
+    for user_id_str, user_data in users_db.items():
+        if user_data.get('allowed'):
+            try:
+                await bot.send_message(
+                    int(user_id_str),
+                    f"📢 **Admin xabari:**\n\n{broadcast_text}",
+                    parse_mode='Markdown'
+                )
+                sent_count += 1
+                await asyncio.sleep(0.05)
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"❌ Xabar yuborilmadi {user_id_str}: {e}")
+    
+    await status_msg.edit_text(
+        f"✅ Xabar yuborildi (faqat ruxsat berilganlarga)!\n\n"
+        f"📤 Yuborilgan: {sent_count}\n"
+        f"❌ Yuborilmagan: {failed_count}"
+    )
+
+# ============= MA'LUMOTLARNI YANGILASH =============
+@dp.callback_query(F.data == "admin_refresh")
+async def admin_refresh_callback(callback: CallbackQuery):
+    """Ma'lumotlarni yangilash"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    # Ma'lumotlar bazasini qayta yuklash
+    load_users_db()
+    
+    await callback.answer("✅ Ma'lumotlar yangilandi!", show_alert=True)
+    
+    # Admin panelga qaytish
+    await admin_panel(callback.message)
+
+# ============= ORTGA QAYTISH =============
+@dp.callback_query(F.data == "back_to_admin")
+async def back_to_admin_callback(callback: CallbackQuery):
+    """Admin panelga qaytish"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    # Yangi xabar sifatida admin panelni yuborish
+    await callback.message.delete()
+    await admin_panel(callback.message)
+
+# ============= FOYDALANUVCHI PROFILINI KO'RISH (ADMIN) =============
+@dp.message(Command("user_info"))
+async def user_info_command(message: types.Message):
+    """Foydalanuvchi ma'lumotlarini ko'rish"""
+    if not is_admin(message.from_user.id):
+        await message.reply("❌ Siz admin emassiz!")
+        return
+    
+    try:
+        user_id = int(message.text.split()[1])
+    except (IndexError, ValueError):
+        await message.reply("❌ Noto'g'ri format! `/user_info 123456789`")
+        return
+    
+    user_id_str = str(user_id)
+    if user_id_str not in users_db:
+        await message.reply(f"❌ Foydalanuvchi `{user_id}` topilmadi!", parse_mode='Markdown')
+        return
+    
+    user = users_db[user_id_str]
+    
+    text = (
+        f"👤 **Foydalanuvchi ma'lumotlari**\n\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"👤 Ism: {user.get('first_name', 'Noma\'lum')}\n"
+    )
+    
+    if user.get('last_name'):
+        text += f"👥 Familiya: {user['last_name']}\n"
+    if user.get('username'):
+        text += f"📱 Username: @{user['username']}\n"
+    
+    text += f"\n📅 Ro'yxatdan o'tgan: {user.get('joined_date', 'Noma\'lum')[:19]}\n"
+    
+    if user.get('approved_date'):
+        text += f"✅ Ruxsat berilgan: {user['approved_date'][:19]}\n"
+    elif user.get('rejected_date'):
+        text += f"❌ Rad etilgan: {user['rejected_date'][:19]}\n"
+    else:
+        text += f"⏳ Ruxsat: Kutilmoqda\n"
+    
+    text += (
+        f"\n🎮 **O'yin statistikasi:**\n"
+        f"📊 O'ynalgan quizlar: {user.get('quizzes_played', 0)}\n"
+        f"🏆 Umumiy ball: {user.get('total_score', 0)}\n"
+    )
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Ruxsat berish", callback_data=f"approve_{user_id}"),
+                InlineKeyboardButton(text="❌ Rad etish", callback_data=f"reject_{user_id}")
+            ],
+            [
+                InlineKeyboardButton(text="🗑️ O'chirish", callback_data=f"admin_remove_{user_id}"),
+                InlineKeyboardButton(text="◀️ Ortga", callback_data="back_to_admin")
+            ]
+        ]
+    )
+    
+    await message.reply(text, parse_mode='Markdown', reply_markup=keyboard)
+
+@dp.callback_query(F.data.startswith('admin_remove_'))
+async def admin_remove_callback(callback: CallbackQuery):
+    """Admin panelidan foydalanuvchini o'chirish"""
+    if not is_admin(callback.from_user.id):
+        await callback.answer("❌ Siz admin emassiz!", show_alert=True)
+        return
+    
+    user_id = int(callback.data.split('_')[2])
+    
+    if remove_user(user_id):
+        await callback.answer(f"✅ Foydalanuvchi o'chirildi!", show_alert=True)
+        await callback.message.edit_text(
+            callback.message.text + "\n\n✅ **Foydalanuvchi o'chirildi!**"
+        )
+    else:
+        await callback.answer(f"❌ Foydalanuvchi topilmadi!", show_alert=True)
+        
 # ============= QUIZ FUNKSIYALARI (faqat ruxsat berilganlar uchun) =============
 QUIZ_DATA = [
     {
