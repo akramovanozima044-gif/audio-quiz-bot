@@ -90,8 +90,9 @@ books_db = {}
 
 
 # ============= ADMIN TEKSHIRISH =============
+# ============= ADMIN TEKSHIRISH - TUZATILGAN VERSIYA =============
 def admin_required(handler):
-    """Admin huquqini tekshirish (message uchun)"""
+    """Admin huquqini tekshirish (FSMContext bilan ishlaydi)"""
     async def wrapper(message: Message, *args, **kwargs):
         if not is_admin(message.from_user.id):
             await message.reply("❌ Bu funksiya faqat adminlar uchun!")
