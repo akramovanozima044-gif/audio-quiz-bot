@@ -1869,8 +1869,6 @@ async def echo_message(message: types.Message):
             "Yordam olish uchun /help ni bosing."
         )
 
-
-# ============= BOTNI ISHGA TUSHIRISH =============
 async def on_startup():
     """Bot ishga tushganda"""
     logger.info("=" * 50)
@@ -1879,6 +1877,7 @@ async def on_startup():
     
     # Ma'lumotlar bazasini yuklash
     load_users_db()
+    load_books_db()  # <--- SHUNI QO'SHING!
     
     # Adminlarni tekshirish
     logger.info(f"👨‍💼 Adminlar: {ADMIN_IDS}")
@@ -1895,15 +1894,11 @@ async def on_startup():
     logger.info(f"✅ Bot username: @{bot_info.username}")
     logger.info(f"✅ Bot ismi: {bot_info.first_name}")
     logger.info(f"✅ Bot ID: {bot_info.id}")
+    logger.info(f"📚 Kitoblar: {len(books_db)} ta")  # <--- Tekshirish
     logger.info("=" * 50)
 
 # ============= TEST TIZIMINI ISHGA TUSHIRISH =============
-def init_test_system():
-    """Test tizimini ishga tushirish"""
-    global books_db
-    load_books_db()
-    logger.info("📚 Test tuzish tizimi yuklandi")
-    logger.info(f"📊 Jami kitoblar: {len(books_db)} ta")
+
 
 async def main():
     await on_startup()
