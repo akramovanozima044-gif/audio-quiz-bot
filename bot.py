@@ -91,24 +91,6 @@ books_db = {}
 
 # ============= ADMIN TEKSHIRISH =============
 # ============= ADMIN TEKSHIRISH - TUZATILGAN VERSIYA =============
-def admin_required(handler):
-    """Admin huquqini tekshirish (FSMContext bilan ishlaydi)"""
-    async def wrapper(message: Message, *args, **kwargs):
-        if not is_admin(message.from_user.id):
-            await message.reply("❌ Bu funksiya faqat adminlar uchun!")
-            return
-        return await handler(message, *args, **kwargs)
-    return wrapper
-
-def admin_callback_required(handler):
-    """Admin huquqini tekshirish (callback uchun)"""
-    async def wrapper(callback: CallbackQuery, *args, **kwargs):
-        if not is_admin(callback.from_user.id):
-            await callback.answer("❌ Bu funksiya faqat adminlar uchun!", show_alert=True)
-            return
-        await callback.answer()
-        return await handler(callback, *args, **kwargs)
-    return wrapper
 
 def load_users_db():
     """Foydalanuvchilar ma'lumotlarini yuklash"""
@@ -160,6 +142,24 @@ def save_books_db():
     except Exception as e:
         logger.error(f"❌ Kitoblarni saqlashda xatolik: {e}")
 
+def admin_required(handler):
+    """Admin huquqini tekshirish (FSMContext bilan ishlaydi)"""
+    async def wrapper(message: Message, *args, **kwargs):
+        if not is_admin(message.from_user.id):
+            await message.reply("❌ Bu funksiya faqat adminlar uchun!")
+            return
+        return await handler(message, *args, **kwargs)
+    return wrapper
+
+def admin_callback_required(handler):
+    """Admin huquqini tekshirish (callback uchun)"""
+    async def wrapper(callback: CallbackQuery, *args, **kwargs):
+        if not is_admin(callback.from_user.id):
+            await callback.answer("❌ Bu funksiya faqat adminlar uchun!", show_alert=True)
+            return
+        await callback.answer()
+        return await handler(callback, *args, **kwargs)
+    return wrapper
 
 
 def is_user_allowed(user_id):
