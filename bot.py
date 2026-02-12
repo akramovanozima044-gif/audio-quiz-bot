@@ -142,9 +142,14 @@ def save_books_db():
     except Exception as e:
         logger.error(f"❌ Kitoblarni saqlashda xatolik: {e}")
 
+# ============= ADMIN TEKSHIRISH - TUZATILGAN VERSIYA =============
 def admin_required(handler):
     """Admin huquqini tekshirish (FSMContext bilan ishlaydi)"""
     async def wrapper(message: Message, *args, **kwargs):
+        # 'dispatcher' argumentini olib tashlash
+        if 'dispatcher' in kwargs:
+            del kwargs['dispatcher']
+        
         if not is_admin(message.from_user.id):
             await message.reply("❌ Bu funksiya faqat adminlar uchun!")
             return
@@ -154,6 +159,10 @@ def admin_required(handler):
 def admin_callback_required(handler):
     """Admin huquqini tekshirish (callback uchun)"""
     async def wrapper(callback: CallbackQuery, *args, **kwargs):
+        # 'dispatcher' argumentini olib tashlash
+        if 'dispatcher' in kwargs:
+            del kwargs['dispatcher']
+        
         if not is_admin(callback.from_user.id):
             await callback.answer("❌ Bu funksiya faqat adminlar uchun!", show_alert=True)
             return
